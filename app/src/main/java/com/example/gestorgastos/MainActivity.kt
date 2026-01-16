@@ -72,7 +72,7 @@ class MainActivity : AppCompatActivity() {
             mostrarDialogoAgregarGasto()
         }
 
-        // CAMBIO: Configurar botón de ajustes
+        // Configurar botón de ajustes
         binding.btnConfig.setOnClickListener {
             mostrarDialogoConfiguracion()
         }
@@ -84,6 +84,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnMesSiguiente.setOnClickListener {
             viewModel.mesSiguiente()
+        }
+
+        // Botón EXPORTAR
+        binding.btnExportar.setOnClickListener {
+            mostrarMenuFormatoExportacion()
         }
     }
 
@@ -296,6 +301,64 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Error cámara", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // PASO 1: Elegir Formato
+    private fun mostrarMenuFormatoExportacion() {
+        val opciones = arrayOf("Hoja de Cálculo (CSV)", "Imagen Larga (JPG)")
+
+        AlertDialog.Builder(this)
+            .setTitle("1. Elige el formato")
+            .setItems(opciones) { _, which ->
+                val esImagen = (which == 1)
+                mostrarMenuAccionExportacion(esImagen)
+            }
+            .show()
+    }
+
+    // PASO 2: Elegir Acción (Guardar o Compartir)
+    private fun mostrarMenuAccionExportacion(esImagen: Boolean) {
+        val opciones = arrayOf("Guardar en Dispositivo", "Compartir (WhatsApp/Email...)")
+        val titulo = if (esImagen) "Imagen Larga" else "Archivo CSV"
+
+        AlertDialog.Builder(this)
+            .setTitle("2. ¿Qué hacer con $titulo?")
+            .setItems(opciones) { _, which ->
+                procesarExportacion(esImagen, guardarEnDispositivo = (which == 0))
+            }
+            .show()
+    }
+
+    // LÓGICA FINAL
+    private fun procesarExportacion(esImagen: Boolean, guardarEnDispositivo: Boolean) {
+        val listaActual = viewModel.gastosDelMes.value ?: emptyList()
+        if (listaActual.isEmpty()) {
+            Toast.makeText(this, "No hay gastos para exportar", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Preparamos los datos (Puede tardar un poco, idealmente en corrutina, pero aqui es rapido)
+        var bitmapFinal: android.graphics.Bitmap? = null
+        var csvContent: String? = null
+
+        if (esImagen) {
+            // Pasamos 'binding.cardResumen' para que pinte la cabecera verde
+            // Y pasamos la lista para que pinte los items debajo
+            bitmapFinal = com.example.gestorgastos.ui.ExportarHelper.generarImagenLarga(
+                this,
+                binding.cardResumen,
+                listaActual
+            )
+        } else {
+            csvContent = com.example.gestorgastos.ui.ExportarHelper.generarTextoCSV(listaActual)
+        }
+
+        // Ejecutamos la acción
+        if (guardarEnDispositivo) {
+            com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this, bitmapFinal, csvContent, esImagen)
+        } else {
+            com.example.gestorgastos.ui.ExportarHelper.compartir(this, bitmapFinal, csvContent, esImagen)
         }
     }
 }
