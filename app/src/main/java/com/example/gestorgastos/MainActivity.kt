@@ -131,34 +131,77 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupObservers() {
+        // 1. Lista de Gastos
         viewModel.gastosDelMes.observe(this) { listaGastos ->
             adapter.submitList(listaGastos)
             binding.tvVacio.visibility = if (listaGastos.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         }
 
-        // Usamos Formato.formatearMoneda
+        // 2. Total y Animaciones
         viewModel.sumaTotalDelMes.observe(this) { suma ->
             val total = suma ?: 0.0
-            binding.tvTotalMes.text = Formato.formatearMoneda(total)
 
-            val colorRes = viewModel.obtenerColorAlerta(total)
-            binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, colorRes))
+            // A. Actualizar texto con formato
+            binding.tvTotalMes.text = com.example.gestorgastos.ui.Formato.formatearMoneda(total)
+
+            // B. Calcular el nuevo color destino
+            val idColorDestino = viewModel.obtenerColorAlerta(total)
+            val colorDestino = ContextCompat.getColor(this, idColorDestino)
+
+            // C. Obtener el color que tiene AHORA mismo (para la transición)
+            val background = binding.layoutAlerta.background
+            val colorActual = if (background is android.graphics.drawable.ColorDrawable) {
+                background.color
+            } else {
+                // Si es la primera vez, asumimos verde por defecto
+                ContextCompat.getColor(this, com.example.gestorgastos.R.color.alerta_verde)
+            }
+
+            // D. ANIMACIÓN DE COLOR (Solo si cambia)
+            if (colorActual != colorDestino) {
+                val colorAnimation = android.animation.ValueAnimator.ofObject(
+                    android.animation.ArgbEvaluator(),
+                    colorActual,
+                    colorDestino
+                )
+                colorAnimation.duration = 1000 // 1 segundo de transición suave
+                colorAnimation.addUpdateListener { animator ->
+                    binding.layoutAlerta.setBackgroundColor(animator.animatedValue as Int)
+                }
+                colorAnimation.start()
+            } else {
+                // Si es el mismo color, aseguramos que esté puesto (para el inicio de la app)
+                binding.layoutAlerta.setBackgroundColor(colorDestino)
+            }
+
+            // E. ANIMACIÓN DE "LATIDO" (Pop) EN EL TEXTO
+            // Hacemos que el texto crezca un poco y vuelva a su tamaño
+            binding.tvTotalMes.animate()
+                .scaleX(1.2f)
+                .scaleY(1.2f)
+                .setDuration(200)
+                .withEndAction {
+                    // Cuando termine de crecer, vuelve al tamaño original
+                    binding.tvTotalMes.animate()
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .setDuration(200)
+                        .start()
+                }
+                .start()
         }
 
-        // Observamos cambio de límites para repintar el semáforo al instante
+        // 3. Observer para cambio de límites (Forzar repintado)
         viewModel.notificarCambioLimites.observe(this) {
+            // Obtenemos el valor actual del total
             val totalActual = viewModel.sumaTotalDelMes.value ?: 0.0
-            val colorRes = viewModel.obtenerColorAlerta(totalActual)
-            binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, colorRes))
-        }
 
-        // Observar cambio de mes para actualizar el título
-        viewModel.mesActual.observe(this) { mes ->
-            // Formateamos la fecha a español (ej: "Enero 2026")
-            val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale("es", "ES"))
-            // Capitalizamos la primera letra (enero -> Enero)
-            val textoMes = mes.format(formatter).replaceFirstChar { it.uppercase() }
-            binding.tvMesTitulo.text = textoMes
+            // 1. IMPORTANTE: Actualizamos el TEXTO para que cambie el símbolo (€ -> $)
+            binding.tvTotalMes.text = com.example.gestorgastos.ui.Formato.formatearMoneda(totalActual)
+
+            // 2. Actualizamos el COLOR (por si al cambiar de moneda cambiaste también los límites)
+            val nuevoColor = ContextCompat.getColor(this, viewModel.obtenerColorAlerta(totalActual))
+            binding.layoutAlerta.setBackgroundColor(nuevoColor)
         }
     }
 
@@ -185,8 +228,19 @@ class MainActivity : AppCompatActivity() {
             val descripcion = dialogBinding.etDescripcion.text.toString()
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
-                val cantidad = cantidadStr.toDoubleOrNull() ?: 0.0
-                viewModel.agregarGasto(nombre, cantidad, descripcion, uriFotoFinal)
+                val cantidadNueva = cantidadStr.toDoubleOrNull() ?: 0.0
+
+                // 1. Guardamos el gasto (esto va a la base de datos)
+                viewModel.agregarGasto(nombre, cantidadNueva, descripcion, uriFotoFinal)
+
+                // 2. CALCULAMOS EL FUTURO PARA EL FLASH
+                // Cogemos lo que hay ahora en pantalla + lo que acabamos de meter
+                val totalActual = viewModel.sumaTotalDelMes.value ?: 0.0
+                val totalFuturo = totalActual + cantidadNueva
+
+                // 3. Lanzamos el flash con el valor futuro
+                hacerFlashBorde(totalFuturo)
+
             } else {
                 Toast.makeText(this, "Faltan datos", Toast.LENGTH_SHORT).show()
             }
@@ -235,54 +289,62 @@ class MainActivity : AppCompatActivity() {
         builder.show()
     }
 
-    // CAMBIO: Nueva función para el diálogo de configuración
+
     private fun mostrarDialogoConfiguracion() {
         val builder = AlertDialog.Builder(this)
         val dialogBinding = com.example.gestorgastos.databinding.DialogConfiguracionBinding.inflate(LayoutInflater.from(this))
 
-        // Pre-llenar (usando formato bonito, pero quitando el símbolo € si lo tuviere para editar solo número)
-        // Nota: viewModel.limiteAmarillo es Double (ej 500.0). Lo formateamos a String bonito para mostrarlo.
-        // Pero para editar es mejor texto plano o usar nuestro watcher.
-        // TRUCO: Simplemente lo ponemos y dejamos que el usuario edite.
-
-        // Asignamos el Watcher a los campos para que ponga puntos mientras escribes
         dialogBinding.etAmarillo.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etAmarillo))
         dialogBinding.etRojo.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etRojo))
 
-        // Convertimos el Double a texto bonito para empezar (quitando puntos para no liar al watcher al inicio, o dejándolo)
-        // Lo más fácil: setear texto plano y dejar que el watcher lo arregle al tocarlo, o formatearlo ya.
-        // Vamos a ponerlo sin formato inicial para simplificar, el usuario escribirá.
         dialogBinding.etAmarillo.setText(viewModel.limiteAmarillo.toString().replace(".", ","))
         dialogBinding.etRojo.setText(viewModel.limiteRojo.toString().replace(".", ","))
 
         builder.setView(dialogBinding.root)
+        builder.setTitle("Configuración") // Título
+
         builder.setPositiveButton("Guardar") { _, _ ->
-            // IMPORTANTE: Antes de convertir a número, tenemos que QUITAR los puntos y cambiar la COMA por punto
-            // para que Kotlin lo entienda como Double.
             val amarilloStr = dialogBinding.etAmarillo.text.toString().replace(".", "").replace(",", ".")
             val rojoStr = dialogBinding.etRojo.text.toString().replace(".", "").replace(",", ".")
 
             if (amarilloStr.isNotEmpty() && rojoStr.isNotEmpty()) {
                 val amarillo = amarilloStr.toDoubleOrNull() ?: 0.0
                 val rojo = rojoStr.toDoubleOrNull() ?: 0.0
-
-                // --- VALIDACIÓN SOLICITADA ---
                 if (amarillo >= rojo) {
-                    Toast.makeText(this, "El límite Amarillo debe ser MENOR que el Rojo", Toast.LENGTH_LONG).show()
-                    // Reabrimos el diálogo porque se habrá cerrado (truco rápido) o simplemente mostramos error.
-                    // Al ser un Dialog nativo, se cierra al dar al botón.
-                    // Para evitar que se cierre habría que configurar el botón aparte,
-                    // pero para no complicar el código, lanzamos el Toast y el usuario tendrá que volver a abrirlo.
+                    Toast.makeText(this, "El amarillo debe ser menor que el rojo", Toast.LENGTH_LONG).show()
                     return@setPositiveButton
                 }
-                // -----------------------------
-
                 viewModel.guardarNuevosLimites(amarillo, rojo)
-                Toast.makeText(this, "Límites actualizados", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Guardado", Toast.LENGTH_SHORT).show()
             }
         }
+
+        // BOTÓN NUEVO: CAMBIAR MONEDA
+        builder.setNeutralButton("Cambiar Moneda") { _, _ ->
+            mostrarDialogoMoneda()
+        }
+
         builder.setNegativeButton("Cancelar", null)
         builder.show()
+    }
+
+    // Nueva función pequeña para elegir moneda
+    private fun mostrarDialogoMoneda() {
+        val monedas = arrayOf("Euro (€)", "Dólar ($)", "Libra (£)")
+        AlertDialog.Builder(this)
+            .setTitle("Elige tu divisa")
+            .setItems(monedas) { _, which ->
+                when(which) {
+                    0 -> com.example.gestorgastos.ui.Formato.cambiarDivisa("EUR")
+                    1 -> com.example.gestorgastos.ui.Formato.cambiarDivisa("USD")
+                    2 -> com.example.gestorgastos.ui.Formato.cambiarDivisa("GBP")
+                }
+                // Forzamos actualizar la pantalla para ver el cambio
+                adapter.notifyDataSetChanged() // Actualiza la lista
+                viewModel.notificarCambioLimites.value = true // Actualiza el total de arriba
+                Toast.makeText(this, "Moneda cambiada", Toast.LENGTH_SHORT).show()
+            }
+            .show()
     }
 
     private fun checkCameraPermissionAndOpen() {
@@ -360,5 +422,54 @@ class MainActivity : AppCompatActivity() {
         } else {
             com.example.gestorgastos.ui.ExportarHelper.compartir(this, bitmapFinal, csvContent, esImagen)
         }
+    }
+
+    // --- FUNCIÓN PARA EL EFECTO DE FLASH ESCALONADO ---
+    private fun hacerFlashBorde(totalSimulado: Double) {
+
+        // Usamos el totalSimulado para calcular el color, no el actual
+        val colorResId = viewModel.obtenerColorAlerta(totalSimulado)
+        val color = ContextCompat.getColor(this, colorResId)
+
+        // 1. Determinar cuántas veces parpadea según el color
+        val numFlashes = when (colorResId) {
+            com.example.gestorgastos.R.color.alerta_rojo -> 3 // Rojo = 3 veces
+            com.example.gestorgastos.R.color.alerta_amarillo -> 2 // Amarillo = 2 veces
+            else -> 1 // Verde = 1 vez
+        }
+
+        // 2. Configurar la vista de flash
+        binding.viewFlashBorde.setBackgroundColor(color)
+        binding.viewFlashBorde.visibility = android.view.View.VISIBLE
+        binding.viewFlashBorde.alpha = 0f
+
+        // 3. Función recursiva (Igual que antes)
+        fun ejecutarAnimacionFlash(vecesRestantes: Int) {
+            if (vecesRestantes <= 0) {
+                binding.viewFlashBorde.visibility = android.view.View.GONE
+                binding.viewFlashBorde.background = null
+                return
+            }
+
+            // Encender
+            binding.viewFlashBorde.animate()
+                .alpha(0.5f) // Intensidad del flash
+                .setDuration(150)
+                .withEndAction {
+                    // Apagar
+                    binding.viewFlashBorde.animate()
+                        .alpha(0f)
+                        .setDuration(150)
+                        .withEndAction {
+                            // Repetir
+                            ejecutarAnimacionFlash(vecesRestantes - 1)
+                        }
+                        .start()
+                }
+                .start()
+        }
+
+        // 4. ¡Arrancar!
+        ejecutarAnimacionFlash(numFlashes)
     }
 }

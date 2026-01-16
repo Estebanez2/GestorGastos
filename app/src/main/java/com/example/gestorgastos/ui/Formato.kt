@@ -4,9 +4,19 @@ import java.text.NumberFormat
 import java.util.Locale
 
 object Formato {
-    private val formatoEuro = NumberFormat.getCurrencyInstance(Locale("es", "ES"))
+    // Variable para guardar la moneda actual (Por defecto España)
+    var localeActual: Locale = Locale("es", "ES")
 
     fun formatearMoneda(cantidad: Double): String {
-        return formatoEuro.format(cantidad)
+        val formato = NumberFormat.getCurrencyInstance(localeActual)
+        return formato.format(cantidad)
+    }
+
+    fun cambiarDivisa(tipo: String) {
+        localeActual = when(tipo) {
+            "USD" -> Locale("en", "US") // Dólares (formato 1,000.00)
+            "GBP" -> Locale("en", "GB") // Libras
+            else -> Locale("es", "ES")  // Euro (formato 1.000,00)
+        }
     }
 }
