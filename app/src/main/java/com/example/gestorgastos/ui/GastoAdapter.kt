@@ -21,8 +21,8 @@ class GastoAdapter(private val onItemClicked: (Gasto) -> Unit) :
 
         fun bind(gasto: Gasto, onItemClicked: (Gasto) -> Unit) {
             binding.tvNombre.text = gasto.nombre
-            // Formateamos el dinero con el símbolo de Euro
-            binding.tvCantidad.text = String.format("%.2f €", gasto.cantidad)
+            // Usamos nuestra nueva utilidad Formato
+            binding.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
 
             // Formateamos la fecha (De milisegundos a texto legible)
             val sdf = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
