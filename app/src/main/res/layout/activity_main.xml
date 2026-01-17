@@ -7,40 +7,52 @@
     android:layout_height="match_parent"
     android:background="@color/gris_fondo">
 
-    <ImageButton
-        android:id="@+id/btnExportar"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginEnd="60dp"
-        android:layout_marginTop="@dimen/margin_medium"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:src="@android:drawable/ic_menu_share"
-        app:tint="@color/black"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <ImageButton
-        android:id="@+id/btnConfig"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_margin="@dimen/margin_medium"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:src="@android:drawable/ic_menu_preferences"
+    <LinearLayout
+        android:id="@+id/layoutBotones"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:tint="@color/black" />
+        android:layout_margin="@dimen/margin_medium">
+
+        <ImageButton
+            android:id="@+id/btnExportar"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_share"
+            app:tint="@color/black" />
+
+        <ImageButton
+            android:id="@+id/btnCambiarVista"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_view"
+            app:tint="@color/black" />
+
+        <ImageButton
+            android:id="@+id/btnConfig"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_preferences"
+            app:tint="@color/black" />
+    </LinearLayout>
 
     <androidx.cardview.widget.CardView
         android:id="@+id/cardResumen"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="@dimen/margin_medium"
-        android:layout_marginTop="60dp"
+        android:layout_marginTop="10dp"
         app:cardCornerRadius="@dimen/card_corner_radius"
         app:cardElevation="4dp"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/layoutBotones"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
+
         <LinearLayout
             android:id="@+id/layoutAlerta"
             android:layout_width="match_parent"
@@ -61,7 +73,7 @@
                 android:id="@+id/tvTotalMes"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                tools:text="120.50 €"
+                tools:text="1.200,50 €"
                 android:textColor="@color/white"
                 android:textSize="@dimen/text_display"
                 android:textStyle="bold" />
@@ -75,7 +87,6 @@
         android:orientation="horizontal"
         android:gravity="center"
         android:paddingVertical="@dimen/margin_small"
-        android:layout_marginTop="@dimen/margin_small"
         app:layout_constraintTop_toBottomOf="@+id/cardResumen"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -86,15 +97,14 @@
             android:layout_height="48dp"
             android:src="@android:drawable/ic_media_previous"
             android:background="?attr/selectableItemBackgroundBorderless"
-            app:tint="@color/black"
-            android:contentDescription="Mes Anterior" />
+            app:tint="@color/black" />
 
         <TextView
             android:id="@+id/tvMesTitulo"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginHorizontal="@dimen/margin_medium"
-            android:text="Enero 2026"
+            tools:text="Enero 2026"
             android:textSize="@dimen/text_subtitle"
             android:textStyle="bold"
             android:textColor="@color/black"/>
@@ -105,22 +115,51 @@
             android:layout_height="48dp"
             android:src="@android:drawable/ic_media_next"
             android:background="?attr/selectableItemBackgroundBorderless"
-            app:tint="@color/black"
-            android:contentDescription="Mes Siguiente" />
+            app:tint="@color/black" />
     </LinearLayout>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvGastos"
+    <FrameLayout
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="@dimen/margin_small"
-        android:clipToPadding="false"
-        android:paddingBottom="80dp"
         app:layout_constraintTop_toBottomOf="@+id/layoutNavegacion"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        tools:listitem="@layout/item_gasto" />
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvGastos"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="80dp"
+            android:visibility="visible"/>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvCalendario"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="8dp"
+            android:clipToPadding="false"
+            android:paddingBottom="80dp"
+            android:visibility="gone"/>
+
+        <com.github.mikephil.charting.charts.BarChart
+            android:id="@+id/chartGastos"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="16dp"
+            android:paddingBottom="80dp"
+            android:visibility="gone"/>
+
+        <TextView
+            android:id="@+id/tvVacio"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No hay datos para mostrar"
+            android:layout_gravity="center"
+            android:visibility="gone"/>
+
+    </FrameLayout>
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabAgregar"
@@ -128,33 +167,18 @@
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin_large"
         android:src="@android:drawable/ic_input_add"
-        android:contentDescription="Añadir Gasto"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
-
-    <TextView
-        android:id="@+id/tvVacio"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="No hay gastos este mes.\n¡Pulsa + para añadir uno!"
-        android:textAlignment="center"
-        android:textSize="@dimen/text_subtitle"
-        android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@+id/rvGastos"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"/>
 
     <View
         android:id="@+id/viewFlashBorde"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@android:color/transparent"
         android:visibility="gone"
-        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
         android:elevation="10dp"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

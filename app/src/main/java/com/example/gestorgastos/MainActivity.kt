@@ -3,6 +3,8 @@ package com.example.gestorgastos
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.View
+import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -10,6 +12,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -17,25 +21,43 @@ import com.bumptech.glide.Glide
 import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.ActivityMainBinding
 import com.example.gestorgastos.databinding.DialogAgregarGastoBinding
-// CAMBIO: Importamos el binding de config y el Formato
 import com.example.gestorgastos.databinding.DialogConfiguracionBinding
+import com.example.gestorgastos.ui.CalendarioAdapter
 import com.example.gestorgastos.ui.Formato
 import com.example.gestorgastos.ui.GastoAdapter
 import com.example.gestorgastos.ui.GastoViewModel
+import com.github.mikephil.charting.components.XAxis
+import com.github.mikephil.charting.data.BarData
+import com.github.mikephil.charting.data.BarDataSet
+import com.github.mikephil.charting.data.BarEntry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.ZoneId
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var viewModel: GastoViewModel
-    private lateinit var adapter: GastoAdapter
+
+    // CAMBIO: Renombramos 'adapter' a 'adapterLista' para no confundir con el del calendario
+    private lateinit var adapterLista: GastoAdapter
+
+    // CAMBIO: Enumeración para controlar qué vista estamos viendo (Lista, Calendario o Gráfica)
+    enum class Vista { LISTA, CALENDARIO, GRAFICA }
+    private var vistaActual = Vista.LISTA
 
     // Variables para manejar la foto
     private var uriFotoTemporal: android.net.Uri? = null
     private var uriFotoFinal: String? = null
     private var ivPreviewActual: android.widget.ImageView? = null
 
-    // LANZADORES (Se mantienen igual)
+    // Variable para el diálogo de carga al exportar
+    private var progressDialog: AlertDialog? = null
+
+    // --- LANZADORES DE PERMISOS Y FOTOS ---
     private val requestCameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
@@ -64,146 +86,188 @@ class MainActivity : AppCompatActivity() {
 
         viewModel = ViewModelProvider(this)[GastoViewModel::class.java]
 
-        setupRecyclerView()
-        setupSwipeToDelete()
+        // 1. Configurar las 3 vistas (Lista, Calendario, Gráfica)
+        setupVistas()
+
+        // 2. Configurar todos los botones
+        setupBotones()
+
+        // 3. Configurar los observadores de datos (LiveData)
         setupObservers()
-
-        binding.fabAgregar.setOnClickListener {
-            mostrarDialogoAgregarGasto()
-        }
-
-        // Configurar botón de ajustes
-        binding.btnConfig.setOnClickListener {
-            mostrarDialogoConfiguracion()
-        }
-
-        // Navegación de meses
-        binding.btnMesAnterior.setOnClickListener {
-            viewModel.mesAnterior()
-        }
-
-        binding.btnMesSiguiente.setOnClickListener {
-            viewModel.mesSiguiente()
-        }
-
-        // Botón EXPORTAR
-        binding.btnExportar.setOnClickListener {
-            mostrarMenuFormatoExportacion()
-        }
     }
 
-    private fun setupRecyclerView() {
-        adapter = GastoAdapter { gasto ->
-            mostrarDialogoEditarGasto(gasto)
-        }
+    // --- CONFIGURACIÓN INICIAL DE VISTAS ---
+    private fun setupVistas() {
+        // A. Configurar RecyclerView de la LISTA
+        adapterLista = GastoAdapter { gasto -> mostrarDialogoEditarGasto(gasto) }
         binding.rvGastos.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = this@MainActivity.adapter
+            adapter = adapterLista
+        }
+        setupSwipeToDelete() // Activar deslizar para borrar
+
+        // B. Configurar RecyclerView del CALENDARIO (Rejilla de 7 columnas)
+        binding.rvCalendario.layoutManager = GridLayoutManager(this, 7)
+
+        // C. Configurar GRÁFICA (Estilo visual)
+        setupEstiloGrafica()
+    }
+
+    // --- CONFIGURACIÓN DE BOTONES ---
+    private fun setupBotones() {
+        // Agregar Gasto
+        binding.fabAgregar.setOnClickListener { mostrarDialogoAgregarGasto() }
+
+        // Configuración (Engranaje)
+        binding.btnConfig.setOnClickListener { mostrarDialogoConfiguracion() }
+
+        // Exportar (Compartir)
+        binding.btnExportar.setOnClickListener { mostrarMenuFormatoExportacion() }
+
+        // Navegación de meses (Flechas)
+        binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
+        binding.btnMesSiguiente.setOnClickListener { viewModel.mesSiguiente() }
+
+        // CAMBIO: BOTÓN "OJO" PARA CAMBIAR VISTA (Lista / Calendario / Gráfica)
+        binding.btnCambiarVista.setOnClickListener { view ->
+            val popup = PopupMenu(this, view)
+            popup.menu.add(0, 0, 0, "Ver Lista")
+            popup.menu.add(0, 1, 0, "Ver Calendario")
+            popup.menu.add(0, 2, 0, "Ver Gráfica")
+
+            popup.setOnMenuItemClickListener { item ->
+                when(item.itemId) {
+                    0 -> cambiarVista(Vista.LISTA)
+                    1 -> cambiarVista(Vista.CALENDARIO)
+                    2 -> cambiarVista(Vista.GRAFICA)
+                }
+                true
+            }
+            popup.show()
         }
     }
 
-    private fun setupSwipeToDelete() {
-        val swipeHandler = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
-            override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder): Boolean = false
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                val position = viewHolder.adapterPosition
-                val gastoABorrar = adapter.currentList[position]
-                mostrarDialogoConfirmacionBorrado(gastoABorrar, position)
+    // --- LÓGICA PARA CAMBIAR ENTRE VISTAS ---
+    private fun cambiarVista(nuevaVista: Vista) {
+        vistaActual = nuevaVista
+        // Primero ocultamos todo
+        binding.rvGastos.visibility = View.GONE
+        binding.rvCalendario.visibility = View.GONE
+        binding.chartGastos.visibility = View.GONE
+        binding.tvVacio.visibility = View.GONE
+
+        // Mostramos solo la elegida
+        when(vistaActual) {
+            Vista.LISTA -> {
+                binding.rvGastos.visibility = View.VISIBLE
+                // Si la lista está vacía, mostramos el aviso
+                if (adapterLista.currentList.isEmpty()) binding.tvVacio.visibility = View.VISIBLE
             }
+            Vista.CALENDARIO -> binding.rvCalendario.visibility = View.VISIBLE
+            Vista.GRAFICA -> binding.chartGastos.visibility = View.VISIBLE
         }
-        ItemTouchHelper(swipeHandler).attachToRecyclerView(binding.rvGastos)
     }
 
-    private fun mostrarDialogoConfirmacionBorrado(gasto: Gasto, position: Int) {
-        AlertDialog.Builder(this)
-            .setTitle("¿Borrar Gasto?")
-            .setMessage("¿Eliminar '${gasto.nombre}'?")
-            .setPositiveButton("Eliminar") { _, _ ->
-                viewModel.borrarGasto(gasto)
-                Toast.makeText(this, "Eliminado", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancelar") { dialog, _ ->
-                adapter.notifyItemChanged(position)
-                dialog.dismiss()
-            }
-            .setCancelable(false)
-            .show()
-    }
-
+    // --- OBSERVADORES (REACTIVIDAD) ---
     private fun setupObservers() {
-        // 1. Lista de Gastos
+
+        // 1. OBSERVAR CAMBIO DE MES (Arreglado el bug del título)
+        viewModel.mesActual.observe(this) { mes ->
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
+            // Ponemos la primera letra en mayúscula (enero -> Enero)
+            binding.tvMesTitulo.text = mes.format(formatter).replaceFirstChar { it.uppercase() }
+        }
+
+        // 2. OBSERVAR LISTA DE GASTOS (Actualiza las 3 vistas a la vez)
         viewModel.gastosDelMes.observe(this) { listaGastos ->
-            adapter.submitList(listaGastos)
-            binding.tvVacio.visibility = if (listaGastos.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
+            // A. Actualizar Lista normal
+            adapterLista.submitList(listaGastos)
+
+            // B. Actualizar Calendario
+            val mesActual = viewModel.mesActual.value ?: java.time.YearMonth.now()
+            binding.rvCalendario.adapter = CalendarioAdapter(mesActual, listaGastos)
+
+            // C. Actualizar Gráfica
+            actualizarDatosGrafica(listaGastos)
+
+            // D. Gestionar mensaje "Vacío" (Solo si estamos en modo lista)
+            if (listaGastos.isEmpty() && vistaActual == Vista.LISTA) {
+                binding.tvVacio.visibility = View.VISIBLE
+            } else if (vistaActual == Vista.LISTA) {
+                binding.tvVacio.visibility = View.GONE
+            }
         }
 
-        // 2. Total y Animaciones
+        // 3. OBSERVAR TOTAL DEL MES
         viewModel.sumaTotalDelMes.observe(this) { suma ->
-            val total = suma ?: 0.0
-
-            // A. Actualizar texto con formato
-            binding.tvTotalMes.text = com.example.gestorgastos.ui.Formato.formatearMoneda(total)
-
-            // B. Calcular el nuevo color destino
-            val idColorDestino = viewModel.obtenerColorAlerta(total)
-            val colorDestino = ContextCompat.getColor(this, idColorDestino)
-
-            // C. Obtener el color que tiene AHORA mismo (para la transición)
-            val background = binding.layoutAlerta.background
-            val colorActual = if (background is android.graphics.drawable.ColorDrawable) {
-                background.color
-            } else {
-                // Si es la primera vez, asumimos verde por defecto
-                ContextCompat.getColor(this, com.example.gestorgastos.R.color.alerta_verde)
-            }
-
-            // D. ANIMACIÓN DE COLOR (Solo si cambia)
-            if (colorActual != colorDestino) {
-                val colorAnimation = android.animation.ValueAnimator.ofObject(
-                    android.animation.ArgbEvaluator(),
-                    colorActual,
-                    colorDestino
-                )
-                colorAnimation.duration = 1000 // 1 segundo de transición suave
-                colorAnimation.addUpdateListener { animator ->
-                    binding.layoutAlerta.setBackgroundColor(animator.animatedValue as Int)
-                }
-                colorAnimation.start()
-            } else {
-                // Si es el mismo color, aseguramos que esté puesto (para el inicio de la app)
-                binding.layoutAlerta.setBackgroundColor(colorDestino)
-            }
-
-            // E. ANIMACIÓN DE "LATIDO" (Pop) EN EL TEXTO
-            // Hacemos que el texto crezca un poco y vuelva a su tamaño
-            binding.tvTotalMes.animate()
-                .scaleX(1.2f)
-                .scaleY(1.2f)
-                .setDuration(200)
-                .withEndAction {
-                    // Cuando termine de crecer, vuelve al tamaño original
-                    binding.tvTotalMes.animate()
-                        .scaleX(1.0f)
-                        .scaleY(1.0f)
-                        .setDuration(200)
-                        .start()
-                }
-                .start()
+            actualizarTotalYColor(suma ?: 0.0)
         }
 
-        // 3. Observer para cambio de límites (Forzar repintado)
+        // 4. OBSERVAR CAMBIO DE LÍMITES O MONEDA
         viewModel.notificarCambioLimites.observe(this) {
-            // Obtenemos el valor actual del total
-            val totalActual = viewModel.sumaTotalDelMes.value ?: 0.0
-
-            // 1. IMPORTANTE: Actualizamos el TEXTO para que cambie el símbolo (€ -> $)
-            binding.tvTotalMes.text = com.example.gestorgastos.ui.Formato.formatearMoneda(totalActual)
-
-            // 2. Actualizamos el COLOR (por si al cambiar de moneda cambiaste también los límites)
-            val nuevoColor = ContextCompat.getColor(this, viewModel.obtenerColorAlerta(totalActual))
-            binding.layoutAlerta.setBackgroundColor(nuevoColor)
+            val total = viewModel.sumaTotalDelMes.value ?: 0.0
+            actualizarTotalYColor(total)
         }
     }
+
+    private fun actualizarTotalYColor(total: Double) {
+        binding.tvTotalMes.text = Formato.formatearMoneda(total)
+        val colorRes = viewModel.obtenerColorAlerta(total)
+        binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, colorRes))
+
+        // Animación latido del texto
+        binding.tvTotalMes.animate().scaleX(1.1f).scaleY(1.1f).setDuration(100).withEndAction {
+            binding.tvTotalMes.animate().scaleX(1f).scaleY(1f).setDuration(100).start()
+        }.start()
+    }
+
+    // --- LÓGICA GRÁFICA (MPAndroidChart) ---
+    private fun setupEstiloGrafica() {
+        binding.chartGastos.apply {
+            description.isEnabled = false
+            legend.isEnabled = false
+            setDrawGridBackground(false)
+            setFitBars(true)
+            animateY(1000)
+            xAxis.position = XAxis.XAxisPosition.BOTTOM
+            xAxis.setDrawGridLines(false)
+            xAxis.granularity = 1f
+            axisRight.isEnabled = false
+        }
+    }
+
+    private fun actualizarDatosGrafica(listaGastos: List<Gasto>) {
+        if (listaGastos.isEmpty()) {
+            binding.chartGastos.clear()
+            return
+        }
+
+        // Agrupar gastos por día
+        val gastosPorDia = mutableMapOf<Int, Double>()
+        for (gasto in listaGastos) {
+            val fecha = java.time.Instant.ofEpochMilli(gasto.fecha).atZone(ZoneId.systemDefault()).toLocalDate()
+            gastosPorDia[fecha.dayOfMonth] = (gastosPorDia[fecha.dayOfMonth] ?: 0.0) + gasto.cantidad
+        }
+
+        // Crear barras para todos los días del mes
+        val entradas = ArrayList<BarEntry>()
+        val mesActual = viewModel.mesActual.value ?: java.time.YearMonth.now()
+        for (i in 1..mesActual.lengthOfMonth()) {
+            entradas.add(BarEntry(i.toFloat(), gastosPorDia[i]?.toFloat() ?: 0f))
+        }
+
+        val dataSet = BarDataSet(entradas, "Gastos")
+        dataSet.color = ContextCompat.getColor(this, com.example.gestorgastos.R.color.alerta_verde)
+        dataSet.valueTextSize = 10f
+        dataSet.valueFormatter = object : com.github.mikephil.charting.formatter.ValueFormatter() {
+            override fun getFormattedValue(value: Float): String = if (value > 0) value.toInt().toString() else ""
+        }
+
+        binding.chartGastos.data = BarData(dataSet)
+        binding.chartGastos.invalidate()
+    }
+
+    // --- DIÁLOGOS (Agregar, Editar, Configurar) ---
 
     private fun mostrarDialogoAgregarGasto() {
         val builder = AlertDialog.Builder(this)
@@ -212,7 +276,7 @@ class MainActivity : AppCompatActivity() {
         uriFotoFinal = null
         ivPreviewActual = dialogBinding.ivPreviewFoto
 
-        // AÑADIR EL WATCHER AQUÍ
+        // Watcher para formato europeo mientras escribes
         dialogBinding.etCantidad.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etCantidad))
 
         dialogBinding.btnCamara.setOnClickListener { checkCameraPermissionAndOpen() }
@@ -221,25 +285,17 @@ class MainActivity : AppCompatActivity() {
         builder.setView(dialogBinding.root)
         builder.setPositiveButton("Guardar") { _, _ ->
             val nombre = dialogBinding.etNombre.text.toString()
-
-            // LIMPIAR FORMATO ANTES DE GUARDAR (Quitar puntos, coma -> punto)
+            // Limpiamos formato para guardar numero limpio (1.000,00 -> 1000.00)
             val cantidadStr = dialogBinding.etCantidad.text.toString().replace(".", "").replace(",", ".")
-
             val descripcion = dialogBinding.etDescripcion.text.toString()
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cantidadNueva = cantidadStr.toDoubleOrNull() ?: 0.0
-
-                // 1. Guardamos el gasto (esto va a la base de datos)
                 viewModel.agregarGasto(nombre, cantidadNueva, descripcion, uriFotoFinal)
 
-                // 2. CALCULAMOS EL FUTURO PARA EL FLASH
-                // Cogemos lo que hay ahora en pantalla + lo que acabamos de meter
+                // CAMBIO: Calculamos el total FUTURO para que el flash sea del color correcto
                 val totalActual = viewModel.sumaTotalDelMes.value ?: 0.0
-                val totalFuturo = totalActual + cantidadNueva
-
-                // 3. Lanzamos el flash con el valor futuro
-                hacerFlashBorde(totalFuturo)
+                hacerFlashBorde(totalActual + cantidadNueva)
 
             } else {
                 Toast.makeText(this, "Faltan datos", Toast.LENGTH_SHORT).show()
@@ -255,14 +311,13 @@ class MainActivity : AppCompatActivity() {
 
         dialogBinding.tvTituloDialogo.text = "Editar Gasto"
         dialogBinding.etNombre.setText(gasto.nombre)
-        dialogBinding.etCantidad.setText(gasto.cantidad.toString())
+        dialogBinding.etCantidad.setText(gasto.cantidad.toString().replace(".", ","))
+        dialogBinding.etCantidad.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etCantidad))
         dialogBinding.etDescripcion.setText(gasto.descripcion)
         uriFotoFinal = gasto.uriFoto
         ivPreviewActual = dialogBinding.ivPreviewFoto
 
-        if (uriFotoFinal != null) {
-            Glide.with(this).load(uriFotoFinal).centerCrop().into(dialogBinding.ivPreviewFoto)
-        }
+        if (uriFotoFinal != null) Glide.with(this).load(uriFotoFinal).centerCrop().into(dialogBinding.ivPreviewFoto)
 
         dialogBinding.btnCamara.setOnClickListener { checkCameraPermissionAndOpen() }
         dialogBinding.btnGaleria.setOnClickListener { pickGalleryLauncher.launch("image/*") }
@@ -270,29 +325,21 @@ class MainActivity : AppCompatActivity() {
         builder.setView(dialogBinding.root)
         builder.setPositiveButton("Actualizar") { _, _ ->
             val nombre = dialogBinding.etNombre.text.toString()
-            val cantidadStr = dialogBinding.etCantidad.text.toString()
+            val cantidadStr = dialogBinding.etCantidad.text.toString().replace(".", "").replace(",", ".")
             val descripcion = dialogBinding.etDescripcion.text.toString()
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cantidad = cantidadStr.toDoubleOrNull() ?: 0.0
-                val gastoEditado = gasto.copy(
-                    nombre = nombre,
-                    cantidad = cantidad,
-                    descripcion = descripcion,
-                    uriFoto = uriFotoFinal
-                )
-                viewModel.actualizarGasto(gastoEditado)
-                Toast.makeText(this, "Actualizado", Toast.LENGTH_SHORT).show()
+                viewModel.actualizarGasto(gasto.copy(nombre = nombre, cantidad = cantidad, descripcion = descripcion, uriFoto = uriFotoFinal))
             }
         }
         builder.setNegativeButton("Cancelar", null)
         builder.show()
     }
 
-
     private fun mostrarDialogoConfiguracion() {
         val builder = AlertDialog.Builder(this)
-        val dialogBinding = com.example.gestorgastos.databinding.DialogConfiguracionBinding.inflate(LayoutInflater.from(this))
+        val dialogBinding = DialogConfiguracionBinding.inflate(LayoutInflater.from(this))
 
         dialogBinding.etAmarillo.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etAmarillo))
         dialogBinding.etRojo.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etRojo))
@@ -301,8 +348,6 @@ class MainActivity : AppCompatActivity() {
         dialogBinding.etRojo.setText(viewModel.limiteRojo.toString().replace(".", ","))
 
         builder.setView(dialogBinding.root)
-        builder.setTitle("Configuración") // Título
-
         builder.setPositiveButton("Guardar") { _, _ ->
             val amarilloStr = dialogBinding.etAmarillo.text.toString().replace(".", "").replace(",", ".")
             val rojoStr = dialogBinding.etRojo.text.toString().replace(".", "").replace(",", ".")
@@ -310,49 +355,124 @@ class MainActivity : AppCompatActivity() {
             if (amarilloStr.isNotEmpty() && rojoStr.isNotEmpty()) {
                 val amarillo = amarilloStr.toDoubleOrNull() ?: 0.0
                 val rojo = rojoStr.toDoubleOrNull() ?: 0.0
-                if (amarillo >= rojo) {
-                    Toast.makeText(this, "El amarillo debe ser menor que el rojo", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
+                if (amarillo >= rojo) return@setPositiveButton
                 viewModel.guardarNuevosLimites(amarillo, rojo)
-                Toast.makeText(this, "Guardado", Toast.LENGTH_SHORT).show()
             }
         }
-
-        // BOTÓN NUEVO: CAMBIAR MONEDA
         builder.setNeutralButton("Cambiar Moneda") { _, _ ->
-            mostrarDialogoMoneda()
+            val monedas = arrayOf("Euro (€)", "Dólar ($)", "Libra (£)")
+            AlertDialog.Builder(this).setTitle("Elige divisa").setItems(monedas) { _, w ->
+                when(w) {
+                    0 -> Formato.cambiarDivisa("EUR")
+                    1 -> Formato.cambiarDivisa("USD")
+                    2 -> Formato.cambiarDivisa("GBP")
+                }
+                adapterLista.notifyDataSetChanged()
+                viewModel.notificarCambioLimites.value = true
+            }.show()
         }
-
         builder.setNegativeButton("Cancelar", null)
         builder.show()
     }
 
-    // Nueva función pequeña para elegir moneda
-    private fun mostrarDialogoMoneda() {
-        val monedas = arrayOf("Euro (€)", "Dólar ($)", "Libra (£)")
-        AlertDialog.Builder(this)
-            .setTitle("Elige tu divisa")
-            .setItems(monedas) { _, which ->
-                when(which) {
-                    0 -> com.example.gestorgastos.ui.Formato.cambiarDivisa("EUR")
-                    1 -> com.example.gestorgastos.ui.Formato.cambiarDivisa("USD")
-                    2 -> com.example.gestorgastos.ui.Formato.cambiarDivisa("GBP")
-                }
-                // Forzamos actualizar la pantalla para ver el cambio
-                adapter.notifyDataSetChanged() // Actualiza la lista
-                viewModel.notificarCambioLimites.value = true // Actualiza el total de arriba
-                Toast.makeText(this, "Moneda cambiada", Toast.LENGTH_SHORT).show()
+    // --- EFECTOS VISUALES (Flash) ---
+    private fun hacerFlashBorde(totalSimulado: Double) {
+        val colorResId = viewModel.obtenerColorAlerta(totalSimulado)
+        val color = ContextCompat.getColor(this, colorResId)
+        val numFlashes = when (colorResId) {
+            com.example.gestorgastos.R.color.alerta_rojo -> 3
+            com.example.gestorgastos.R.color.alerta_amarillo -> 2
+            else -> 1
+        }
+
+        binding.viewFlashBorde.setBackgroundColor(color)
+        binding.viewFlashBorde.visibility = View.VISIBLE
+        binding.viewFlashBorde.alpha = 0f
+
+        fun ejecutarAnimacionFlash(vecesRestantes: Int) {
+            if (vecesRestantes <= 0) {
+                binding.viewFlashBorde.visibility = View.GONE
+                binding.viewFlashBorde.background = null
+                return
             }
-            .show()
+            binding.viewFlashBorde.animate().alpha(0.5f).setDuration(150).withEndAction {
+                binding.viewFlashBorde.animate().alpha(0f).setDuration(150).withEndAction {
+                    ejecutarAnimacionFlash(vecesRestantes - 1)
+                }.start()
+            }.start()
+        }
+        ejecutarAnimacionFlash(numFlashes)
+    }
+
+    // --- EXPORTAR (Con corrutinas para las fotos) ---
+    private fun mostrarMenuFormatoExportacion() {
+        val opciones = arrayOf("Hoja de Cálculo (CSV)", "Imagen Larga (JPG)")
+        AlertDialog.Builder(this).setTitle("Formato").setItems(opciones) { _, w -> mostrarMenuAccionExportacion(w == 1) }.show()
+    }
+
+    private fun mostrarMenuAccionExportacion(esImagen: Boolean) {
+        val opciones = arrayOf("Guardar en Dispositivo", "Compartir")
+        AlertDialog.Builder(this).setTitle("Acción").setItems(opciones) { _, w -> procesarExportacion(esImagen, w == 0) }.show()
+    }
+
+    private fun procesarExportacion(esImagen: Boolean, guardarEnDispositivo: Boolean) {
+        val listaActual = viewModel.gastosDelMes.value ?: emptyList()
+        if (listaActual.isEmpty()) { Toast.makeText(this, "Nada que exportar", Toast.LENGTH_SHORT).show(); return }
+
+        if (esImagen) {
+            progressDialog = AlertDialog.Builder(this).setMessage("Generando imagen...").setCancelable(false).show()
+
+            // Corrutina para cargar fotos en segundo plano
+            lifecycleScope.launch(Dispatchers.IO) {
+                val mapaBitmaps = mutableMapOf<Long, android.graphics.Bitmap>()
+                for (gasto in listaActual) {
+                    if (gasto.uriFoto != null) {
+                        try {
+                            val bitmap = Glide.with(this@MainActivity).asBitmap().load(gasto.uriFoto).centerCrop().submit(100, 100).get()
+                            mapaBitmaps[gasto.id] = bitmap
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
+                }
+                // Volver al hilo principal para dibujar
+                withContext(Dispatchers.Main) {
+                    progressDialog?.dismiss()
+                    val bitmapFinal = com.example.gestorgastos.ui.ExportarHelper.generarImagenLarga(this@MainActivity, binding.cardResumen, listaActual, mapaBitmaps)
+                    if (guardarEnDispositivo) com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this@MainActivity, bitmapFinal, null, true)
+                    else com.example.gestorgastos.ui.ExportarHelper.compartir(this@MainActivity, bitmapFinal, null, true)
+                }
+            }
+        } else {
+            val csvContent = com.example.gestorgastos.ui.ExportarHelper.generarTextoCSV(listaActual)
+            if (guardarEnDispositivo) com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this, null, csvContent, false)
+            else com.example.gestorgastos.ui.ExportarHelper.compartir(this, null, csvContent, false)
+        }
+    }
+
+    // --- UTILS (Swipe, Cámara) ---
+    private fun setupSwipeToDelete() {
+        val swipeHandler = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
+            override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder): Boolean = false
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                val position = viewHolder.adapterPosition
+                val gastoABorrar = adapterLista.currentList[position]
+                mostrarDialogoConfirmacionBorrado(gastoABorrar, position)
+            }
+        }
+        ItemTouchHelper(swipeHandler).attachToRecyclerView(binding.rvGastos)
+    }
+
+    private fun mostrarDialogoConfirmacionBorrado(gasto: Gasto, position: Int) {
+        AlertDialog.Builder(this)
+            .setTitle("¿Borrar?")
+            .setMessage("Se eliminará '${gasto.nombre}'")
+            .setPositiveButton("Eliminar") { _, _ -> viewModel.borrarGasto(gasto) }
+            .setNegativeButton("Cancelar") { d, _ -> adapterLista.notifyItemChanged(position); d.dismiss() }
+            .setCancelable(false).show()
     }
 
     private fun checkCameraPermissionAndOpen() {
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            abrirCamara()
-        } else {
-            requestCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
-        }
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) abrirCamara()
+        else requestCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
     }
 
     private fun abrirCamara() {
@@ -360,116 +480,6 @@ class MainActivity : AppCompatActivity() {
             val tempFile = File.createTempFile("foto_", ".jpg", externalCacheDir)
             uriFotoTemporal = FileProvider.getUriForFile(this, "${packageName}.fileprovider", tempFile)
             takePictureLauncher.launch(uriFotoTemporal)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Error cámara", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // PASO 1: Elegir Formato
-    private fun mostrarMenuFormatoExportacion() {
-        val opciones = arrayOf("Hoja de Cálculo (CSV)", "Imagen Larga (JPG)")
-
-        AlertDialog.Builder(this)
-            .setTitle("1. Elige el formato")
-            .setItems(opciones) { _, which ->
-                val esImagen = (which == 1)
-                mostrarMenuAccionExportacion(esImagen)
-            }
-            .show()
-    }
-
-    // PASO 2: Elegir Acción (Guardar o Compartir)
-    private fun mostrarMenuAccionExportacion(esImagen: Boolean) {
-        val opciones = arrayOf("Guardar en Dispositivo", "Compartir (WhatsApp/Email...)")
-        val titulo = if (esImagen) "Imagen Larga" else "Archivo CSV"
-
-        AlertDialog.Builder(this)
-            .setTitle("2. ¿Qué hacer con $titulo?")
-            .setItems(opciones) { _, which ->
-                procesarExportacion(esImagen, guardarEnDispositivo = (which == 0))
-            }
-            .show()
-    }
-
-    // LÓGICA FINAL
-    private fun procesarExportacion(esImagen: Boolean, guardarEnDispositivo: Boolean) {
-        val listaActual = viewModel.gastosDelMes.value ?: emptyList()
-        if (listaActual.isEmpty()) {
-            Toast.makeText(this, "No hay gastos para exportar", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        // Preparamos los datos (Puede tardar un poco, idealmente en corrutina, pero aqui es rapido)
-        var bitmapFinal: android.graphics.Bitmap? = null
-        var csvContent: String? = null
-
-        if (esImagen) {
-            // Pasamos 'binding.cardResumen' para que pinte la cabecera verde
-            // Y pasamos la lista para que pinte los items debajo
-            bitmapFinal = com.example.gestorgastos.ui.ExportarHelper.generarImagenLarga(
-                this,
-                binding.cardResumen,
-                listaActual
-            )
-        } else {
-            csvContent = com.example.gestorgastos.ui.ExportarHelper.generarTextoCSV(listaActual)
-        }
-
-        // Ejecutamos la acción
-        if (guardarEnDispositivo) {
-            com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this, bitmapFinal, csvContent, esImagen)
-        } else {
-            com.example.gestorgastos.ui.ExportarHelper.compartir(this, bitmapFinal, csvContent, esImagen)
-        }
-    }
-
-    // --- FUNCIÓN PARA EL EFECTO DE FLASH ESCALONADO ---
-    private fun hacerFlashBorde(totalSimulado: Double) {
-
-        // Usamos el totalSimulado para calcular el color, no el actual
-        val colorResId = viewModel.obtenerColorAlerta(totalSimulado)
-        val color = ContextCompat.getColor(this, colorResId)
-
-        // 1. Determinar cuántas veces parpadea según el color
-        val numFlashes = when (colorResId) {
-            com.example.gestorgastos.R.color.alerta_rojo -> 3 // Rojo = 3 veces
-            com.example.gestorgastos.R.color.alerta_amarillo -> 2 // Amarillo = 2 veces
-            else -> 1 // Verde = 1 vez
-        }
-
-        // 2. Configurar la vista de flash
-        binding.viewFlashBorde.setBackgroundColor(color)
-        binding.viewFlashBorde.visibility = android.view.View.VISIBLE
-        binding.viewFlashBorde.alpha = 0f
-
-        // 3. Función recursiva (Igual que antes)
-        fun ejecutarAnimacionFlash(vecesRestantes: Int) {
-            if (vecesRestantes <= 0) {
-                binding.viewFlashBorde.visibility = android.view.View.GONE
-                binding.viewFlashBorde.background = null
-                return
-            }
-
-            // Encender
-            binding.viewFlashBorde.animate()
-                .alpha(0.5f) // Intensidad del flash
-                .setDuration(150)
-                .withEndAction {
-                    // Apagar
-                    binding.viewFlashBorde.animate()
-                        .alpha(0f)
-                        .setDuration(150)
-                        .withEndAction {
-                            // Repetir
-                            ejecutarAnimacionFlash(vecesRestantes - 1)
-                        }
-                        .start()
-                }
-                .start()
-        }
-
-        // 4. ¡Arrancar!
-        ejecutarAnimacionFlash(numFlashes)
+        } catch (e: Exception) { e.printStackTrace() }
     }
 }
