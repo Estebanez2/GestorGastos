@@ -16,7 +16,7 @@ class GastoAdapter(private val onItemClicked: (Gasto) -> Unit) :
     ListAdapter<Gasto, GastoAdapter.GastoViewHolder>(DiffCallback) {
 
     // Esta clase interna maneja la "tarjeta" visual
-    class GastoViewHolder(private val binding: ItemGastoBinding) :
+    class GastoViewHolder(val binding: ItemGastoBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
         fun bind(gasto: Gasto, onItemClicked: (Gasto) -> Unit) {
@@ -60,10 +60,39 @@ class GastoAdapter(private val onItemClicked: (Gasto) -> Unit) :
         return GastoViewHolder(binding)
     }
 
-    // Rellena la "cáscara" con los datos reales
     override fun onBindViewHolder(holder: GastoViewHolder, position: Int) {
-        val gastoActual = getItem(position)
-        holder.bind(gastoActual, onItemClicked)
+        val gasto = getItem(position)
+
+        // 1. Asignar Textos (Nombre, Cantidad, Fecha)
+        holder.binding.tvNombre.text = gasto.nombre
+        holder.binding.tvCantidad.text = com.example.gestorgastos.ui.Formato.formatearMoneda(gasto.cantidad)
+
+        val dateFormat = java.text.SimpleDateFormat("dd MMM", java.util.Locale("es", "ES"))
+        holder.binding.tvFecha.text = dateFormat.format(java.util.Date(gasto.fecha))
+
+        // 2. ASIGNAR ICONO DE CATEGORÍA
+        // Usamos el helper que creamos para elegir el dibujo correcto
+        val iconoRes = com.example.gestorgastos.ui.CategoriasHelper.obtenerIcono(gasto.categoria)
+        holder.binding.ivIconoCategoria.setImageResource(iconoRes)
+
+        // 3. GESTIÓN DE LA FOTO (Thumbnail)
+        if (gasto.uriFoto != null) {
+            // Si hay foto: mostramos la tarjeta y cargamos la imagen con Glide
+            holder.binding.cardThumb.visibility = android.view.View.VISIBLE
+            holder.binding.ivThumb.visibility = android.view.View.VISIBLE
+
+            com.bumptech.glide.Glide.with(holder.itemView.context)
+                .load(gasto.uriFoto)
+                .centerCrop()
+                .into(holder.binding.ivThumb)
+        } else {
+            // Si no hay foto: ocultamos el hueco
+            holder.binding.cardThumb.visibility = android.view.View.GONE
+            holder.binding.ivThumb.visibility = android.view.View.GONE
+        }
+
+        // 4. Click Listener (Para editar al tocar)
+        holder.itemView.setOnClickListener { onItemClicked(gasto) }
     }
 
     // Objeto para optimizar la lista: Compara si los datos han cambiado para no recargar todo

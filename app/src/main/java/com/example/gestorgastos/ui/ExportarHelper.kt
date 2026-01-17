@@ -25,27 +25,64 @@ import java.util.Locale
 
 object ExportarHelper {
 
+    fun capturarVista(view: View): Bitmap {
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        view.draw(canvas)
+        return bitmap
+    }
+
+    fun unirVistasEnBitmap(viewCabecera: View, viewTitulo: View, bitmapContenido: Bitmap): Bitmap {
+        val ancho = maxOf(viewCabecera.width, viewTitulo.width, bitmapContenido.width)
+        val altoTotal = viewCabecera.height + viewTitulo.height + bitmapContenido.height + 50
+
+        val bitmapFinal = Bitmap.createBitmap(ancho, altoTotal, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmapFinal)
+        canvas.drawColor(Color.WHITE)
+
+        // 1. Cabecera
+        viewCabecera.draw(canvas)
+
+        // 2. Título
+        canvas.save()
+        canvas.translate(0f, viewCabecera.height.toFloat())
+        viewTitulo.draw(canvas)
+        canvas.restore()
+
+        // 3. Contenido
+        canvas.save()
+        val yContenido = viewCabecera.height.toFloat() + viewTitulo.height.toFloat() + 20f
+        canvas.translate(0f, yContenido)
+        val xOffset = (ancho - bitmapContenido.width) / 2f
+        canvas.drawBitmap(bitmapContenido, xOffset, 0f, null)
+        canvas.restore()
+
+        return bitmapFinal
+    }
+
     fun generarTextoCSV(listaGastos: List<Gasto>): String {
         val stringBuilder = StringBuilder()
-        stringBuilder.append("Fecha,Concepto,Descripcion,Cantidad\n")
+        stringBuilder.append("Fecha,Categoria,Concepto,Descripcion,Cantidad\n") // He añadido Categoria al CSV también
         val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
         for (gasto in listaGastos) {
             val nombreLimpio = gasto.nombre.replace(",", " ")
             val descLimpia = gasto.descripcion.replace(",", " ")
             val fechaStr = dateFormat.format(Date(gasto.fecha))
             val cantidadStr = gasto.cantidad.toString().replace(".", ",")
-            stringBuilder.append("$fechaStr,$nombreLimpio,$descLimpia,$cantidadStr\n")
+            // CSV ahora incluye la categoría
+            stringBuilder.append("$fechaStr,${gasto.categoria},$nombreLimpio,$descLimpia,$cantidadStr\n")
         }
         return stringBuilder.toString()
     }
 
-    // --- GENERAR IMAGEN LARGA ---
-    // AHORA SÍ ACEPTA EL CUARTO PARÁMETRO: mapaBitmaps
+    // --- GENERAR IMAGEN LARGA (Corregido Iconos) ---
     fun generarImagenLarga(
         context: Context,
         viewCabecera: View,
+        viewTitulo: View,
         listaGastos: List<Gasto>,
-        mapaBitmaps: Map<Long, Bitmap> // <--- ESTO ES LO QUE TE FALTABA
+        mapaBitmaps: Map<Long, Bitmap>
     ): Bitmap? {
         if (listaGastos.isEmpty()) return null
 
@@ -53,19 +90,17 @@ object ExportarHelper {
         val bindingItem = ItemGastoBinding.inflate(LayoutInflater.from(context))
 
         // 1. Calcular altura total
-        var alturaTotal = viewCabecera.height + 50
+        var alturaTotal = viewCabecera.height + viewTitulo.height + 50
         val itemsHeights = mutableListOf<Int>()
 
         for (gasto in listaGastos) {
             bindingItem.tvNombre.text = gasto.nombre
 
-            // Verificamos si tiene foto (ya sea por URI o porque está en el mapa)
+            // Medimos visibilidad de foto para la altura correcta
             val tieneFoto = gasto.uriFoto != null || mapaBitmaps.containsKey(gasto.id)
-
             bindingItem.cardThumb.visibility = if (tieneFoto) View.VISIBLE else View.GONE
             bindingItem.ivThumb.visibility = if (tieneFoto) View.VISIBLE else View.GONE
 
-            // Forzamos medida
             bindingItem.root.measure(
                 View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
@@ -78,38 +113,45 @@ object ExportarHelper {
         val bitmap = Bitmap.createBitmap(ancho, alturaTotal, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
+
+        // 3. Dibujar Cabecera y Título
         viewCabecera.draw(canvas)
+        canvas.save()
+        canvas.translate(0f, viewCabecera.height.toFloat())
+        viewTitulo.draw(canvas)
+        canvas.restore()
 
-        var currentY = viewCabecera.height.toFloat() + 20f
+        // 4. Dibujar Lista
+        var currentY = viewCabecera.height.toFloat() + viewTitulo.height.toFloat() + 20f
 
-        // 3. DIBUJAR FILA A FILA
         for ((index, gasto) in listaGastos.withIndex()) {
+            // Datos de texto
             bindingItem.tvNombre.text = gasto.nombre
             bindingItem.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
             bindingItem.tvFecha.text = SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(gasto.fecha))
 
-            // --- USAR IMAGEN PRECARGADA ---
-            val bitmapPrecargado = mapaBitmaps[gasto.id]
+            // --- NUEVO: PINTAR CATEGORÍA CORRECTA ---
+            val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
+            bindingItem.ivIconoCategoria.setImageResource(iconoRes)
 
+            // Gestión de Foto
+            val bitmapPrecargado = mapaBitmaps[gasto.id]
             if (bitmapPrecargado != null) {
-                // Tenemos la foto lista: mostramos contenedor e imagen
                 bindingItem.cardThumb.visibility = View.VISIBLE
                 bindingItem.ivThumb.visibility = View.VISIBLE
                 bindingItem.ivThumb.setImageBitmap(bitmapPrecargado)
                 bindingItem.ivThumb.setPadding(0,0,0,0)
             } else if (gasto.uriFoto != null) {
-                // Falló la carga: icono de error
                 bindingItem.cardThumb.visibility = View.VISIBLE
                 bindingItem.ivThumb.visibility = View.VISIBLE
                 bindingItem.ivThumb.setImageResource(android.R.drawable.ic_menu_gallery)
                 bindingItem.ivThumb.setPadding(20,20,20,20)
             } else {
-                // No tiene foto
                 bindingItem.cardThumb.visibility = View.GONE
                 bindingItem.ivThumb.visibility = View.GONE
             }
 
-            // Medir, colocar y dibujar
+            // Dibujar
             bindingItem.root.measure(
                 View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
@@ -126,7 +168,7 @@ object ExportarHelper {
         return bitmap
     }
 
-    // ... (El resto de funciones guardarEnDispositivo y compartir se mantienen IGUAL) ...
+    // Funciones guardar y compartir se mantienen igual...
     fun guardarEnDispositivo(context: Context, bitmap: Bitmap?, csvContent: String?, esImagen: Boolean) {
         val timeStamp = System.currentTimeMillis()
         if (esImagen && bitmap != null) {
