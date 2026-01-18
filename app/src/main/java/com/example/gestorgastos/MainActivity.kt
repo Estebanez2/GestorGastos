@@ -815,7 +815,14 @@ class MainActivity : AppCompatActivity() {
         })
 
         binding.chartCategorias.data = data
+
+        // 1. Quitamos cualquier selección (el quesito que estaba resaltado baja)
         binding.chartCategorias.highlightValues(null)
+
+        // 2. Volvemos a poner el texto original del centro
+        binding.chartCategorias.centerText = "Gastos\nPor Categoría"
+        binding.chartCategorias.setCenterTextSize(16f)
+        binding.chartCategorias.setCenterTextColor(Color.GRAY)
         binding.chartCategorias.invalidate()
     }
 
