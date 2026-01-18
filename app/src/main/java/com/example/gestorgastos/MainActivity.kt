@@ -319,6 +319,9 @@ class MainActivity : AppCompatActivity() {
             // 3. Actualizamos el adaptador de la lista principal
             adapterLista.mapaCategorias = mapaCategoriasActual
             adapterLista.notifyDataSetChanged()
+            
+            adapterGastosCategoria.mapaCategorias = mapaCategoriasActual
+            adapterGastosCategoria.notifyDataSetChanged()
         }
     }
 
