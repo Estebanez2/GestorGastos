@@ -149,4 +149,11 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
             dao.borrarCategoria(categoria)
         }
     }
+
+    // Devuelve un Mapa: "Comida" = 150.0, "Transporte" = 30.0...
+    fun obtenerGastosPorCategoria(lista: List<Gasto>): Map<String, Double> {
+        // Agrupa por categoría y suma las cantidades
+        return lista.groupBy { it.categoria }
+            .mapValues { entry -> entry.value.sumOf { it.cantidad } }
+    }
 }

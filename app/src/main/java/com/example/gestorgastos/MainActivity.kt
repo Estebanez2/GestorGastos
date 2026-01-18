@@ -7,7 +7,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.ImageView
-import android.widget.PopupMenu
+import com.github.mikephil.charting.formatter.ValueFormatter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -27,14 +27,23 @@ import com.example.gestorgastos.databinding.DialogAgregarGastoBinding
 import com.example.gestorgastos.databinding.DialogConfiguracionBinding
 import com.example.gestorgastos.ui.CalendarioAdapter
 import com.example.gestorgastos.ui.EuroTextWatcher
+import com.example.gestorgastos.ui.ExportarHelper
 import com.example.gestorgastos.ui.Formato
 import com.example.gestorgastos.ui.GastoAdapter
 import com.example.gestorgastos.ui.GastoViewModel
 import com.example.gestorgastos.ui.ImageZoomHelper
+import com.github.mikephil.charting.animation.Easing
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.BarData
 import com.github.mikephil.charting.data.BarDataSet
 import com.github.mikephil.charting.data.BarEntry
+import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.data.PieData
+import com.github.mikephil.charting.data.PieDataSet
+import com.github.mikephil.charting.data.PieEntry
+import com.github.mikephil.charting.highlight.Highlight
+import com.github.mikephil.charting.listener.OnChartValueSelectedListener
+import com.github.mikephil.charting.utils.ColorTemplate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,7 +60,7 @@ class MainActivity : AppCompatActivity() {
 
     private var adapterCalendario: CalendarioAdapter? = null
 
-    enum class Vista { LISTA, CALENDARIO, GRAFICA }
+    enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
     private var vistaActual = Vista.LISTA
 
     private var uriFotoTemporal: android.net.Uri? = null
@@ -124,6 +133,7 @@ class MainActivity : AppCompatActivity() {
         setupVistas()
         setupBotones()
         setupObservers()
+        setupPieChart()
     }
 
     private fun setupVistas() {
@@ -154,17 +164,33 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnCambiarVista.setOnClickListener { view ->
-            val popup = PopupMenu(this, view)
-            popup.menu.add(0, 0, 0, "Ver Lista")
-            popup.menu.add(0, 1, 0, "Ver Calendario")
-            popup.menu.add(0, 2, 0, "Ver Gráfica")
+            // Usamos androidx.appcompat.widget.PopupMenu para mayor compatibilidad
+            val popup = androidx.appcompat.widget.PopupMenu(this, view)
+
+            // 1. INFLAMOS EL XML (Aquí está la magia)
+            popup.menuInflater.inflate(R.menu.menu_vistas, popup.menu)
+
+            // 2. GESTIONAMOS LOS CLICKS USANDO LOS IDs DEL XML
             popup.setOnMenuItemClickListener { item ->
                 when(item.itemId) {
-                    0 -> cambiarVista(Vista.LISTA)
-                    1 -> cambiarVista(Vista.CALENDARIO)
-                    2 -> cambiarVista(Vista.GRAFICA)
+                    R.id.menu_vista_lista -> {
+                        cambiarVista(Vista.LISTA)
+                        true
+                    }
+                    R.id.menu_vista_calendario -> {
+                        cambiarVista(Vista.CALENDARIO)
+                        true
+                    }
+                    R.id.menu_vista_barras -> {
+                        cambiarVista(Vista.GRAFICA)
+                        true
+                    }
+                    R.id.menu_vista_categorias -> {
+                        cambiarVista(Vista.QUESITOS)
+                        true
+                    }
+                    else -> false
                 }
-                true
             }
             popup.show()
         }
@@ -172,18 +198,28 @@ class MainActivity : AppCompatActivity() {
 
     private fun cambiarVista(nuevaVista: Vista) {
         vistaActual = nuevaVista
+
+        // Ocultar todo
         binding.rvGastos.visibility = View.GONE
         binding.rvCalendario.visibility = View.GONE
         binding.chartGastos.visibility = View.GONE
+        binding.chartCategorias.visibility = View.GONE
         binding.tvVacio.visibility = View.GONE
 
-        when(vistaActual) {
+        when (vistaActual) {
             Vista.LISTA -> {
-                binding.rvGastos.visibility = View.VISIBLE
-                if (adapterLista.currentList.isEmpty()) binding.tvVacio.visibility = View.VISIBLE
+                if (viewModel.gastosDelMes.value.isNullOrEmpty()) binding.tvVacio.visibility = View.VISIBLE
+                else binding.rvGastos.visibility = View.VISIBLE
             }
             Vista.CALENDARIO -> binding.rvCalendario.visibility = View.VISIBLE
-            Vista.GRAFICA -> binding.chartGastos.visibility = View.VISIBLE
+            Vista.GRAFICA -> {
+                binding.chartGastos.visibility = View.VISIBLE
+                binding.chartGastos.animateY(800)
+            }
+            Vista.QUESITOS -> {
+                binding.chartCategorias.visibility = View.VISIBLE
+                binding.chartCategorias.animateY(800)
+            }
         }
     }
 
@@ -204,6 +240,7 @@ class MainActivity : AppCompatActivity() {
 
             // C. Gráfica
             actualizarDatosGrafica(listaGastos)
+            actualizarPieChart(listaGastos)
 
             if (listaGastos.isEmpty() && vistaActual == Vista.LISTA) binding.tvVacio.visibility = View.VISIBLE
             else if (vistaActual == Vista.LISTA) binding.tvVacio.visibility = View.GONE
@@ -339,18 +376,8 @@ class MainActivity : AppCompatActivity() {
                     2 -> Formato.cambiarDivisa("GBP")
                 }
 
-                // 1. Actualizar Lista
-                adapterLista.notifyDataSetChanged()
+                refrescarVistasPorCambioConfiguracion()
 
-                // 2. CORRECCIÓN: Actualizar Calendario
-                adapterCalendario?.notifyDataSetChanged()
-
-                // 3. Actualizar Gráfica (Refrescamos los datos actuales para que cojan el nuevo formato)
-                val listaActual = viewModel.gastosDelMes.value ?: emptyList()
-                if (vistaActual == Vista.GRAFICA) actualizarDatosGrafica(listaActual)
-
-                // 4. Actualizar Total
-                viewModel.notificarCambioLimites.value = true
 
                 Toast.makeText(this, "Moneda cambiada", Toast.LENGTH_SHORT).show()
             }
@@ -578,16 +605,16 @@ class MainActivity : AppCompatActivity() {
                             progressDialog?.dismiss()
 
                             // CAMBIO: Ahora pasamos binding.layoutNavegacion también
-                            val bitmapFinal = com.example.gestorgastos.ui.ExportarHelper.generarImagenLarga(
+                            val bitmapFinal = ExportarHelper.generarImagenLarga(
                                 this@MainActivity,
                                 binding.cardResumen,
-                                binding.layoutNavegacion, // <--- Aquí va el título del mes
+                                binding.layoutNavegacion,
                                 listaActual,
                                 mapaBitmaps
                             )
 
-                            if (guardarEnDispositivo) com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this@MainActivity, bitmapFinal, null, true)
-                            else com.example.gestorgastos.ui.ExportarHelper.compartir(this@MainActivity, bitmapFinal, null, true)
+                            if (guardarEnDispositivo) ExportarHelper.guardarEnDispositivo(this@MainActivity, bitmapFinal, null, true)
+                            else ExportarHelper.compartir(this@MainActivity, bitmapFinal, null, true)
                         }
                     }
                 }
@@ -597,36 +624,56 @@ class MainActivity : AppCompatActivity() {
                     // 1. Capturamos solo la gráfica
                     val bitmapGrafica = binding.chartGastos.chartBitmap
                     // 2. Le pegamos encima la cabecera y el título
-                    val bitmapFinal = com.example.gestorgastos.ui.ExportarHelper.unirVistasEnBitmap(
+                    val bitmapFinal = ExportarHelper.unirVistasEnBitmap(
                         binding.cardResumen,
                         binding.layoutNavegacion,
                         bitmapGrafica
                     )
 
-                    if (guardarEnDispositivo) com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this, bitmapFinal, null, true)
-                    else com.example.gestorgastos.ui.ExportarHelper.compartir(this, bitmapFinal, null, true)
+                    finalizarExportacion(bitmapFinal, guardarEnDispositivo)
                 }
 
                 Vista.CALENDARIO -> {
                     // MODO CALENDARIO
                     // 1. Capturamos la rejilla
-                    val bitmapCalendario = com.example.gestorgastos.ui.ExportarHelper.capturarVista(binding.rvCalendario)
+                    val bitmapCalendario = ExportarHelper.capturarVista(binding.rvCalendario)
                     // 2. Le pegamos encima la cabecera y el título
-                    val bitmapFinal = com.example.gestorgastos.ui.ExportarHelper.unirVistasEnBitmap(
+                    val bitmapFinal = ExportarHelper.unirVistasEnBitmap(
                         binding.cardResumen,
                         binding.layoutNavegacion,
                         bitmapCalendario
                     )
 
-                    if (guardarEnDispositivo) com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this, bitmapFinal, null, true)
-                    else com.example.gestorgastos.ui.ExportarHelper.compartir(this, bitmapFinal, null, true)
+                    finalizarExportacion(bitmapFinal, guardarEnDispositivo)
+                }
+
+                Vista.QUESITOS -> {
+                    // MODO QUESITOS (PIE CHART)
+                    // 1. Capturamos el gráfico de quesitos
+                    val bitmapQuesito = binding.chartCategorias.chartBitmap
+
+                    // 2. Lo unimos con la cabecera
+                    val bitmapFinal = ExportarHelper.unirVistasEnBitmap(
+                        binding.cardResumen,
+                        binding.layoutNavegacion,
+                        bitmapQuesito
+                    )
+
+                    // 3. Guardamos/Compartimos
+                    finalizarExportacion(bitmapFinal, guardarEnDispositivo)
                 }
             }
         } else {
-            val csvContent = com.example.gestorgastos.ui.ExportarHelper.generarTextoCSV(listaActual)
-            if (guardarEnDispositivo) com.example.gestorgastos.ui.ExportarHelper.guardarEnDispositivo(this, null, csvContent, false)
-            else com.example.gestorgastos.ui.ExportarHelper.compartir(this, null, csvContent, false)
+            // EXPORTAR CSV (Texto)
+            val csvContent = ExportarHelper.generarTextoCSV(listaActual)
+            if (guardarEnDispositivo) ExportarHelper.guardarEnDispositivo(this, null, csvContent, false)
+            else ExportarHelper.compartir(this, null, csvContent, false)
         }
+    }
+
+    private fun finalizarExportacion(bitmap: android.graphics.Bitmap, guardar: Boolean) {
+        if (guardar) ExportarHelper.guardarEnDispositivo(this, bitmap, null, true)
+        else ExportarHelper.compartir(this, bitmap, null, true)
     }
 
     private fun setupSwipeToDelete() {
@@ -652,5 +699,145 @@ class MainActivity : AppCompatActivity() {
             uriFotoTemporal = FileProvider.getUriForFile(this, "${packageName}.fileprovider", tempFile)
             takePictureLauncher.launch(uriFotoTemporal)
         } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    // CONFIGURACIÓN VISUAL (ESTILO DONUT)
+    private fun setupPieChart() {
+        val chart = binding.chartCategorias
+
+        // 1. Limpieza visual
+        chart.description.isEnabled = false
+        chart.legend.isEnabled = false
+        chart.setHoleColor(Color.TRANSPARENT)
+
+        // 2. Estilo Donut
+        chart.isDrawHoleEnabled = true
+        chart.holeRadius = 45f
+        chart.transparentCircleRadius = 50f
+
+        // 3. Texto del Centro
+        chart.setCenterText("Gastos\nPor Categoría")
+        chart.setCenterTextSize(15f)
+        chart.setCenterTextColor(Color.GRAY)
+
+        // 4. MÁRGENES GRANDES (Para que quepan las flechas)
+        // Damos 50 de margen a los lados. El círculo se hará más pequeño automáticamente.
+        chart.setExtraOffsets(40f, 10f, 40f, 10f)
+
+        // 5. ACTIVAR ETIQUETAS DE TEXTO (Nombre Categoría)
+        chart.setDrawEntryLabels(true)
+        chart.setEntryLabelColor(Color.BLACK) // Importante: Negro para que se vea fuera
+        chart.setEntryLabelTextSize(11f)
+
+        chart.isRotationEnabled = true
+        chart.dragDecelerationFrictionCoef = 0.9f
+
+        chart.animateY(1400, Easing.EaseOutBounce)
+
+        // LISTENER DE SELECCIÓN
+        chart.setOnChartValueSelectedListener(object : OnChartValueSelectedListener {
+
+            // Cuando tocas un quesito
+            override fun onValueSelected(e: Entry?, h: Highlight?) {
+                if (e == null) return
+
+                // e.label es el nombre (ej. "Comida")
+                // e.y es la cantidad (ej. 150.0)
+                val nombre = (e as PieEntry).label
+                val cantidad = Formato.formatearMoneda(e.y.toDouble())
+
+                // Cambiamos el texto del agujero central con letra un poco más grande
+                chart.centerText = "$nombre\n$cantidad"
+                chart.setCenterTextSize(18f)
+                chart.setCenterTextColor(Color.BLACK)
+            }
+
+            // Cuando tocas fuera (deseleccionar)
+            override fun onNothingSelected() {
+                // Volvemos al título original
+                chart.centerText = "Gastos\nPor Categoría"
+                chart.setCenterTextSize(16f)
+                chart.setCenterTextColor(Color.GRAY)
+            }
+        })
+    }
+
+    // RELLENAR DATOS
+    private fun actualizarPieChart(listaGastos: List<Gasto>) {
+        if (listaGastos.isEmpty()) {
+            binding.chartCategorias.clear()
+            return
+        }
+
+        // 1. Agrupar datos
+        val mapaCategorias = listaGastos.groupBy { it.categoria }
+            .mapValues { entry -> entry.value.sumOf { it.cantidad } }
+
+        val entradas = ArrayList<PieEntry>()
+        for ((nombre, total) in mapaCategorias) {
+            // Aquí pasamos el total y el NOMBRE de la categoría
+            entradas.add(PieEntry(total.toFloat(), nombre))
+        }
+
+        // 2. Configurar Dataset
+        val dataSet = PieDataSet(entradas, "")
+        dataSet.sliceSpace = 3f
+        dataSet.selectionShift = 5f
+
+        // Colores
+        val colores = ArrayList<Int>()
+        colores.addAll(ColorTemplate.MATERIAL_COLORS.toList())
+        colores.addAll(ColorTemplate.JOYFUL_COLORS.toList())
+        colores.addAll(ColorTemplate.COLORFUL_COLORS.toList())
+        dataSet.colors = colores
+
+        // 3. SACAR TODO FUERA (Nombre y Cantidad)
+        dataSet.yValuePosition = PieDataSet.ValuePosition.OUTSIDE_SLICE // El número fuera
+        dataSet.xValuePosition = PieDataSet.ValuePosition.OUTSIDE_SLICE // El nombre fuera
+
+        // Estilo de la línea conectora
+        dataSet.valueLineColor = Color.BLACK
+        dataSet.valueLineWidth = 1f
+        dataSet.valueLinePart1Length = 0.4f // Tramo 1 de la línea
+        dataSet.valueLinePart2Length = 0.5f // Tramo 2 (más largo para separar el texto)
+        dataSet.valueLinePart1OffsetPercentage = 80f // Dónde empieza la línea (desde el borde)
+
+        // 4. Crear Datos
+        val data = PieData(dataSet)
+        data.setValueTextSize(11f)
+        data.setValueTextColor(Color.BLACK) // Color del número
+
+        // Formateador solo para el número (el nombre ya sale solo al activar EntryLabels)
+        data.setValueFormatter(object : ValueFormatter() {
+            override fun getFormattedValue(value: Float): String {
+                return Formato.formatearMoneda(value.toDouble())
+            }
+        })
+
+        binding.chartCategorias.data = data
+        binding.chartCategorias.highlightValues(null)
+        binding.chartCategorias.invalidate()
+    }
+
+    // Llama a esto cuando cambies la moneda o el símbolo
+    private fun refrescarVistasPorCambioConfiguracion() {
+        val gastosActuales = viewModel.gastosDelMes.value ?: emptyList()
+
+        // 1. Refrescar la Lista (para cambiar el símbolo en cada fila)
+        adapterLista.notifyDataSetChanged()
+
+        // 2. Refrescar el Gráfico de Quesitos (Categorías)
+        // Al llamarlo de nuevo, volverá a formatear los textos con la nueva moneda
+        actualizarPieChart(gastosActuales)
+
+        // 3. Refrescar el Gráfico de Barras (si lo usas)
+        val listaActual = viewModel.gastosDelMes.value ?: emptyList()
+        if (vistaActual == Vista.GRAFICA) actualizarDatosGrafica(listaActual)
+
+        // 4. Refrescar Calendario (si lo usas)
+        adapterCalendario?.notifyDataSetChanged()
+
+        // 5. Cambiar moneda de TOTAL
+        viewModel.notificarCambioLimites.value = true
     }
 }

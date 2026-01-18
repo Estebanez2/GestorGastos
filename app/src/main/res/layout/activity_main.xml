@@ -159,6 +159,14 @@
             android:paddingBottom="80dp"
             android:visibility="gone"/>
 
+        <com.github.mikephil.charting.charts.PieChart
+            android:id="@+id/chartCategorias"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="16dp"
+            android:paddingBottom="80dp"
+            android:visibility="gone"/>
+
         <TextView
             android:id="@+id/tvVacio"
             android:layout_width="wrap_content"
