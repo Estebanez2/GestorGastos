@@ -233,17 +233,20 @@ class CategoriasActivity : AppCompatActivity() {
             holder.b.tvNombreCat.text = cat.nombre
 
             if (cat.uriFoto != null) {
-                // CASO A: Tiene foto personalizada (Galería/Cámara)
+                // Cargar imagen
                 Glide.with(holder.itemView).load(cat.uriFoto).circleCrop().into(holder.b.ivIconoCat)
-                holder.b.ivIconoCat.clearColorFilter() // Por si acaso
-            } else {
-                // CASO B: Es una categoría por defecto (Comida, Casa...)
-                // Usamos el Helper para recuperar su icono original
-                val iconoRes = CategoriasHelper.obtenerIcono(cat.nombre)
-                holder.b.ivIconoCat.setImageResource(iconoRes)
+                holder.b.ivIconoCat.clearColorFilter()
 
-                // OPCIONAL: Si tus iconos se ven negros, descomenta esta línea para ponerlos negros o gris oscuro
-                // holder.b.ivIconoCat.setColorFilter(android.graphics.Color.BLACK)
+                // CLICK PARA ZOOM (Nuevo)
+                holder.b.ivIconoCat.setOnClickListener {
+                    ImageZoomHelper.mostrarImagen(holder.itemView.context, cat.uriFoto)
+                }
+            } else {
+                // Icono defecto
+                val iconoRes = CategoriasHelper.obtenerIcono(cat.nombre) // O un genérico
+                holder.b.ivIconoCat.setImageResource(iconoRes)
+                // holder.b.ivIconoCat.setColorFilter(...) // Si usas filtro
+                holder.b.ivIconoCat.setOnClickListener(null)
             }
 
             holder.b.btnBorrarCat.setOnClickListener { onBorrar(cat) }

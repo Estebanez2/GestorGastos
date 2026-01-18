@@ -1,9 +1,12 @@
 package com.example.gestorgastos
 
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,9 +26,11 @@ import com.example.gestorgastos.databinding.ActivityMainBinding
 import com.example.gestorgastos.databinding.DialogAgregarGastoBinding
 import com.example.gestorgastos.databinding.DialogConfiguracionBinding
 import com.example.gestorgastos.ui.CalendarioAdapter
+import com.example.gestorgastos.ui.EuroTextWatcher
 import com.example.gestorgastos.ui.Formato
 import com.example.gestorgastos.ui.GastoAdapter
 import com.example.gestorgastos.ui.GastoViewModel
+import com.example.gestorgastos.ui.ImageZoomHelper
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.BarData
 import com.github.mikephil.charting.data.BarDataSet
@@ -74,6 +79,9 @@ class MainActivity : AppCompatActivity() {
                 it.setPadding(0, 0, 0, 0)
                 it.clearColorFilter()
                 it.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                it.setOnClickListener {
+                    ImageZoomHelper.mostrarImagen(this, uriFotoFinal)
+                }
 
                 // 3. Mostrar la X roja
                 // Truco para buscar el botón hermano en el layout
@@ -95,6 +103,9 @@ class MainActivity : AppCompatActivity() {
                 it.setPadding(0, 0, 0, 0)
                 it.clearColorFilter()
                 it.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                it.setOnClickListener {
+                    ImageZoomHelper.mostrarImagen(this, uriFotoFinal)
+                }
 
                 // 3. Mostrar la X roja
                 val parent = it.parent as? android.view.ViewGroup
@@ -358,7 +369,7 @@ class MainActivity : AppCompatActivity() {
         dialogBinding.spinnerCategoria.adapter = adapterSpinner
         uriFotoFinal = null
         ivPreviewActual = dialogBinding.ivPreviewFoto
-        dialogBinding.etCantidad.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etCantidad))
+        dialogBinding.etCantidad.addTextChangedListener(EuroTextWatcher(dialogBinding.etCantidad))
         dialogBinding.btnCamara.setOnClickListener { checkCameraPermissionAndOpen() }
         dialogBinding.btnGaleria.setOnClickListener { pickGalleryLauncher.launch("image/*") }
         dialogBinding.btnBorrarFoto.setOnClickListener {
@@ -366,16 +377,16 @@ class MainActivity : AppCompatActivity() {
 
             // Restaurar icono de cámara
             dialogBinding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera)
-            dialogBinding.ivPreviewFoto.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+            dialogBinding.ivPreviewFoto.scaleType = ImageView.ScaleType.CENTER_INSIDE
 
             // Restaurar padding (usando dimens)
-            val padding = resources.getDimensionPixelSize(com.example.gestorgastos.R.dimen.preview_padding_small)
+            val padding = resources.getDimensionPixelSize(R.dimen.preview_padding_small)
             dialogBinding.ivPreviewFoto.setPadding(padding, padding, padding, padding)
 
             // Restaurar el tinte GRIS (Importante)
-            dialogBinding.ivPreviewFoto.setColorFilter(android.graphics.Color.parseColor("#888888"))
-
-            dialogBinding.btnBorrarFoto.visibility = android.view.View.GONE
+            dialogBinding.ivPreviewFoto.setColorFilter(Color.parseColor("#888888"))
+            dialogBinding.ivPreviewFoto.setOnClickListener(null)
+            dialogBinding.btnBorrarFoto.visibility = View.GONE
         }
         builder.setView(dialogBinding.root)
         builder.setPositiveButton("Guardar") { _, _ ->
@@ -407,7 +418,7 @@ class MainActivity : AppCompatActivity() {
         dialogBinding.tvTituloDialogo.text = "Editar Gasto"
 
         // 1. CONFIGURAR SPINNER (Igual que en agregar)
-        val adapterSpinner = android.widget.ArrayAdapter(
+        val adapterSpinner = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
             listaNombresCategorias
@@ -425,12 +436,13 @@ class MainActivity : AppCompatActivity() {
         // Rellenar resto de datos
         dialogBinding.etNombre.setText(gasto.nombre)
         dialogBinding.etCantidad.setText(gasto.cantidad.toString().replace(".", ","))
-        dialogBinding.etCantidad.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etCantidad))
+        dialogBinding.etCantidad.addTextChangedListener(EuroTextWatcher(dialogBinding.etCantidad))
         dialogBinding.etDescripcion.setText(gasto.descripcion)
         dialogBinding.btnBorrarFoto.setOnClickListener {
             uriFotoFinal = null
             dialogBinding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera)
             dialogBinding.ivPreviewFoto.setPadding(60,60,60,60) // Restaurar padding visual
+            dialogBinding.ivPreviewFoto.setOnClickListener(null)
             dialogBinding.btnBorrarFoto.visibility = android.view.View.GONE
         }
 
@@ -442,9 +454,10 @@ class MainActivity : AppCompatActivity() {
         if (uriFotoFinal != null) {
             Glide.with(this).load(uriFotoFinal).centerCrop().into(dialogBinding.ivPreviewFoto)
             dialogBinding.ivPreviewFoto.setPadding(0,0,0,0)
-            dialogBinding.btnBorrarFoto.visibility = android.view.View.VISIBLE
+            dialogBinding.btnBorrarFoto.visibility = View.VISIBLE
+            dialogBinding.ivPreviewFoto.setOnClickListener { ImageZoomHelper.mostrarImagen(this, uriFotoFinal) }
         } else {
-            dialogBinding.btnBorrarFoto.visibility = android.view.View.GONE
+            dialogBinding.btnBorrarFoto.visibility = View.GONE
         }
 
         dialogBinding.btnCamara.setOnClickListener { checkCameraPermissionAndOpen() }

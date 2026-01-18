@@ -28,41 +28,50 @@ class GastoAdapter(
     override fun onBindViewHolder(holder: GastoViewHolder, position: Int) {
         val gasto = getItem(position)
 
+        // ... (código de textos nombre, cantidad, fecha igual) ...
         holder.binding.tvNombre.text = gasto.nombre
         holder.binding.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
         val dateFormat = SimpleDateFormat("dd MMM", Locale("es", "ES"))
         holder.binding.tvFecha.text = dateFormat.format(Date(gasto.fecha))
 
-        // --- LÓGICA HÍBRIDA (FOTO vs ICONO) ---
+        // --- 1. ICONO CATEGORÍA (Con Zoom) ---
         val uriCategoria = mapaCategorias[gasto.categoria]
 
         if (uriCategoria != null) {
-            // TIENE FOTO: La mostramos tal cual (sin tinte)
+            // FOTO PERSONALIZADA
             holder.binding.ivIconoCategoria.clearColorFilter()
-            Glide.with(holder.itemView)
-                .load(uriCategoria)
-                .circleCrop()
-                .into(holder.binding.ivIconoCategoria)
+            Glide.with(holder.itemView).load(uriCategoria).circleCrop().into(holder.binding.ivIconoCategoria)
+
+            // CLICK PARA ZOOM (Nuevo)
+            holder.binding.ivIconoCategoria.setOnClickListener {
+                ImageZoomHelper.mostrarImagen(holder.itemView.context, uriCategoria)
+            }
         } else {
-            // NO TIENE FOTO: Usamos el icono del Helper (Hamburguesa, Coche...)
+            // ICONO POR DEFECTO (Sin zoom, o zoom deshabilitado)
             val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
             holder.binding.ivIconoCategoria.setImageResource(iconoRes)
-
-            // IMPORTANTE: Como quitaste el tint del XML, aquí lo forzamos a BLANCO
-            // para que se vea bien sobre el fondo oscuro de la tarjeta.
             holder.binding.ivIconoCategoria.setColorFilter(android.graphics.Color.WHITE)
+
+            // Deshabilitamos click para que funcione el click de la fila (editar)
+            holder.binding.ivIconoCategoria.setOnClickListener(null)
         }
 
-        // ... (resto del código de la foto del ticket igual) ...
+        // --- 2. FOTO TICKET (Con Zoom) ---
         if (gasto.uriFoto != null) {
             holder.binding.cardThumb.visibility = View.VISIBLE
             holder.binding.ivThumb.visibility = View.VISIBLE
             Glide.with(holder.itemView).load(gasto.uriFoto).centerCrop().into(holder.binding.ivThumb)
+
+            // CLICK PARA ZOOM (Nuevo)
+            holder.binding.ivThumb.setOnClickListener {
+                ImageZoomHelper.mostrarImagen(holder.itemView.context, gasto.uriFoto)
+            }
         } else {
             holder.binding.cardThumb.visibility = View.GONE
             holder.binding.ivThumb.visibility = View.GONE
         }
 
+        // Click en el resto de la tarjeta -> Editar Gasto
         holder.itemView.setOnClickListener { onItemClicked(gasto) }
     }
 
