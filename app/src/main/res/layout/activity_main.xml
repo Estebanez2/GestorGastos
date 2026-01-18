@@ -159,13 +159,40 @@
             android:paddingBottom="80dp"
             android:visibility="gone"/>
 
-        <com.github.mikephil.charting.charts.PieChart
-            android:id="@+id/chartCategorias"
+        <LinearLayout
+            android:id="@+id/layoutVistaCategorias"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="16dp"
-            android:paddingBottom="80dp"
-            android:visibility="gone"/>
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:weightSum="10">
+
+            <com.github.mikephil.charting.charts.PieChart
+                android:id="@+id/chartCategorias"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="4"
+                android:padding="8dp"/>
+
+            <TextView
+                android:id="@+id/tvTituloCategoriaSeleccionada"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Toca una categoría para ver detalles"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:background="#EEEEEE"/>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvGastosCategoria"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="6"
+                android:clipToPadding="false"
+                android:paddingBottom="80dp"/>
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvVacio"

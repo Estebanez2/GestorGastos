@@ -1,6 +1,7 @@
 package com.example.gestorgastos
 
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -44,6 +45,7 @@ import com.github.mikephil.charting.data.PieEntry
 import com.github.mikephil.charting.highlight.Highlight
 import com.github.mikephil.charting.listener.OnChartValueSelectedListener
 import com.github.mikephil.charting.utils.ColorTemplate
+import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,8 +59,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewModel: GastoViewModel
 
     private lateinit var adapterLista: GastoAdapter
+    // Adaptador para la lista de abajo del donut
+    private lateinit var adapterGastosCategoria: GastoAdapter
 
     private var adapterCalendario: CalendarioAdapter? = null
+    // Variable para recordar qué categoría estamos viendo en el gráfico
+    private var categoriaSeleccionadaActual: String? = null
 
     enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
     private var vistaActual = Vista.LISTA
@@ -137,18 +143,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupVistas() {
-        // Lista
+        // ---------------------------------------------------------
+        // 1. PRIMERO: INICIALIZAR TODOS LOS ADAPTADORES
+        // ---------------------------------------------------------
+
+        // A. Adaptador Lista Principal
         adapterLista = GastoAdapter { gasto -> mostrarDialogoEditarGasto(gasto) }
         binding.rvGastos.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = adapterLista
         }
-        setupSwipeToDelete()
+
+        // B. Adaptador Lista Categorías (Donut) -> ¡AHORA LO CREAMOS AQUÍ ARRIBA!
+        adapterGastosCategoria = GastoAdapter { gasto ->
+            mostrarDialogoEditarGasto(gasto)
+        }
+        binding.rvGastosCategoria.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            adapter = adapterGastosCategoria
+        }
+
+        // ---------------------------------------------------------
+        // 2. SEGUNDO: CONFIGURAR LOS SWIPES (Ahora ya existen los adaptadores)
+        // ---------------------------------------------------------
+
+        // Swipe Lista Principal
+        configurarSwipeBorrar(binding.rvGastos, adapterLista)
+
+        // Swipe Lista Categorías
+        configurarSwipeBorrar(binding.rvGastosCategoria, adapterGastosCategoria)
+
+        // ---------------------------------------------------------
+        // 3. TERCERO: RESTO DE VISTAS
+        // ---------------------------------------------------------
 
         // Calendario
         binding.rvCalendario.layoutManager = GridLayoutManager(this, 7)
 
-        // Gráfica
+        // Estilo Gráfica
         setupEstiloGrafica()
     }
 
@@ -199,12 +231,14 @@ class MainActivity : AppCompatActivity() {
     private fun cambiarVista(nuevaVista: Vista) {
         vistaActual = nuevaVista
 
-        // Ocultar todo
+        // Ocultar TODO
         binding.rvGastos.visibility = View.GONE
         binding.rvCalendario.visibility = View.GONE
         binding.chartGastos.visibility = View.GONE
-        binding.chartCategorias.visibility = View.GONE
         binding.tvVacio.visibility = View.GONE
+
+        // Ocultamos el contenedor NUEVO en vez de solo el chart
+        binding.layoutVistaCategorias.visibility = View.GONE
 
         when (vistaActual) {
             Vista.LISTA -> {
@@ -217,8 +251,16 @@ class MainActivity : AppCompatActivity() {
                 binding.chartGastos.animateY(800)
             }
             Vista.QUESITOS -> {
-                binding.chartCategorias.visibility = View.VISIBLE
-                binding.chartCategorias.animateY(800)
+                // MOSTRAR EL CONTENEDOR ENTERO (Chart + Lista)
+                binding.layoutVistaCategorias.visibility = View.VISIBLE
+
+                // Reiniciamos la animación del gráfico
+                binding.chartCategorias.animateY(1200, Easing.EaseOutBounce)
+
+                // Importante: Limpiar la lista de abajo al entrar para que no salga basura vieja
+                adapterGastosCategoria.submitList(emptyList())
+                binding.tvTituloCategoriaSeleccionada.text = "Toca una categoría para ver detalles"
+                binding.chartCategorias.highlightValues(null) // Deseleccionar
             }
         }
     }
@@ -232,6 +274,15 @@ class MainActivity : AppCompatActivity() {
         viewModel.gastosDelMes.observe(this) { listaGastos ->
             // A. Lista
             adapterLista.submitList(listaGastos)
+            actualizarPieChart(listaGastos) // Esto repinta el gráfico
+
+            if (categoriaSeleccionadaActual != null) {
+                // Si teníamos una categoría seleccionada, filtramos de nuevo con los DATOS NUEVOS
+                val gastosFiltrados = listaGastos.filter { it.categoria == categoriaSeleccionadaActual }
+                adapterGastosCategoria.submitList(gastosFiltrados)
+            } else {
+                adapterGastosCategoria.submitList(emptyList())
+            }
 
             // B. Calendario (Guardamos la referencia en la variable global)
             val mesActual = viewModel.mesActual.value ?: java.time.YearMonth.now()
@@ -359,11 +410,6 @@ class MainActivity : AppCompatActivity() {
         binding.chartGastos.invalidate()
     }
 
-    // --- DIÁLOGOS Y LÓGICA ---
-
-    // Copia aquí las funciones privadas de diálogos (Agregar, Editar, Configurar, Flash, Exportar, etc.)
-    // RECUERDA: La única que cambia un poco es la de mostrarDialogoMoneda para arreglar el bug.
-    // Te pongo aquí la versión arreglada de mostrarDialogoMoneda:
 
     private fun mostrarDialogoMoneda() {
         val monedas = arrayOf("Euro (€)", "Dólar ($)", "Libra (£)")
@@ -671,24 +717,65 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun finalizarExportacion(bitmap: android.graphics.Bitmap, guardar: Boolean) {
+    private fun finalizarExportacion(bitmap: Bitmap, guardar: Boolean) {
         if (guardar) ExportarHelper.guardarEnDispositivo(this, bitmap, null, true)
         else ExportarHelper.compartir(this, bitmap, null, true)
     }
 
-    private fun setupSwipeToDelete() {
+    private fun configurarSwipeBorrar(recyclerView: RecyclerView, adapter: GastoAdapter) {
+
         val swipeHandler = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
+
             override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder): Boolean = false
+
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val position = viewHolder.adapterPosition
-                val gastoABorrar = adapterLista.currentList[position]
-                mostrarDialogoConfirmacionBorrado(gastoABorrar, position)
+                val gastoABorrar = adapter.currentList[position]
+
+                // Pasamos adapter y position para poder restaurar la vista si se cancela
+                mostrarDialogoConfirmacionBorrado(gastoABorrar, adapter, position)
             }
         }
-        ItemTouchHelper(swipeHandler).attachToRecyclerView(binding.rvGastos)
+
+        ItemTouchHelper(swipeHandler).attachToRecyclerView(recyclerView)
     }
-    private fun mostrarDialogoConfirmacionBorrado(gasto: Gasto, position: Int) {
-        AlertDialog.Builder(this).setTitle("¿Borrar?").setMessage("Eliminar '${gasto.nombre}'").setPositiveButton("Eliminar") { _, _ -> viewModel.borrarGasto(gasto) }.setNegativeButton("Cancelar") { d, _ -> adapterLista.notifyItemChanged(position); d.dismiss() }.setCancelable(false).show()
+
+    private fun mostrarDialogoConfirmacionBorrado(gasto: Gasto, adapter: GastoAdapter, position: Int) {
+        AlertDialog.Builder(this)
+            .setTitle("Borrar Gasto")
+            .setMessage("¿Estás seguro de que quieres borrar '${gasto.nombre}'?")
+            .setCancelable(true) // Importante permitir cancelar tocando fuera
+            .setPositiveButton("Borrar") { _, _ ->
+                // 1. Borramos de verdad
+                viewModel.borrarGasto(gasto)
+
+                // 2. Snackbar con protección anti-doble click
+                var deshacerPulsado = false // Semáforo para evitar duplicados
+
+                Snackbar.make(binding.root, "Gasto borrado", Snackbar.LENGTH_LONG)
+                    .setAction("Deshacer") {
+                        if (!deshacerPulsado) {
+                            deshacerPulsado = true // Bloqueamos clicks futuros
+                            viewModel.agregarGasto(
+                                gasto.nombre,
+                                gasto.cantidad,
+                                gasto.descripcion,
+                                gasto.uriFoto,
+                                gasto.categoria
+                            )
+                        }
+                    }.show()
+            }
+            .setNegativeButton("Cancelar") { dialog, _ ->
+                dialog.dismiss()
+                // ESTO ES LO QUE HACE QUE VUELVA VISUALMENTE
+                adapter.notifyItemChanged(position)
+            }
+            .setOnCancelListener {
+                // ESTO ES POR SI TOCAN FUERA DEL CUADRO O BOTÓN ATRÁS
+                adapter.notifyItemChanged(position)
+            }
+            .show()
     }
     private fun checkCameraPermissionAndOpen() {
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) abrirCamara() else requestCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
@@ -712,7 +799,7 @@ class MainActivity : AppCompatActivity() {
 
         // 2. Estilo Donut
         chart.isDrawHoleEnabled = true
-        chart.holeRadius = 45f
+        chart.holeRadius = 40f
         chart.transparentCircleRadius = 50f
 
         // 3. Texto del Centro
@@ -722,7 +809,7 @@ class MainActivity : AppCompatActivity() {
 
         // 4. MÁRGENES GRANDES (Para que quepan las flechas)
         // Damos 50 de margen a los lados. El círculo se hará más pequeño automáticamente.
-        chart.setExtraOffsets(40f, 10f, 40f, 10f)
+        chart.setExtraOffsets(25f, 10f, 25f, 10f)
 
         // 5. ACTIVAR ETIQUETAS DE TEXTO (Nombre Categoría)
         chart.setDrawEntryLabels(true)
@@ -735,29 +822,36 @@ class MainActivity : AppCompatActivity() {
         chart.animateY(1400, Easing.EaseOutBounce)
 
         // LISTENER DE SELECCIÓN
+        // Dentro de setupPieChart...
         chart.setOnChartValueSelectedListener(object : OnChartValueSelectedListener {
-
-            // Cuando tocas un quesito
             override fun onValueSelected(e: Entry?, h: Highlight?) {
-                if (e == null) return
+                val pieEntry = e as? PieEntry ?: return
 
-                // e.label es el nombre (ej. "Comida")
-                // e.y es la cantidad (ej. 150.0)
-                val nombre = (e as PieEntry).label
-                val cantidad = Formato.formatearMoneda(e.y.toDouble())
+                // GUARDAMOS LA SELECCIÓN
+                categoriaSeleccionadaActual = pieEntry.label
 
-                // Cambiamos el texto del agujero central con letra un poco más grande
-                chart.centerText = "$nombre\n$cantidad"
-                chart.setCenterTextSize(18f)
+                // Actualizar textos visuales
+                val cantidad = com.example.gestorgastos.ui.Formato.formatearMoneda(pieEntry.value.toDouble())
+                chart.centerText = "${pieEntry.label}\n$cantidad"
+                chart.setCenterTextSize(16f) // Un poco más grande al seleccionar
                 chart.setCenterTextColor(Color.BLACK)
+                binding.tvTituloCategoriaSeleccionada.text = "Detalles: ${pieEntry.label}"
+
+                // Filtrar lista
+                val gastosTotales = viewModel.gastosDelMes.value ?: emptyList()
+                val gastosFiltrados = gastosTotales.filter { it.categoria == pieEntry.label }
+                adapterGastosCategoria.submitList(gastosFiltrados)
             }
 
-            // Cuando tocas fuera (deseleccionar)
             override fun onNothingSelected() {
-                // Volvemos al título original
+                // RESETEAMOS LA SELECCIÓN
+                categoriaSeleccionadaActual = null
+
                 chart.centerText = "Gastos\nPor Categoría"
-                chart.setCenterTextSize(16f)
+                chart.setCenterTextSize(14f)
                 chart.setCenterTextColor(Color.GRAY)
+                binding.tvTituloCategoriaSeleccionada.text = "Toca una categoría para ver detalles"
+                adapterGastosCategoria.submitList(emptyList())
             }
         })
     }
