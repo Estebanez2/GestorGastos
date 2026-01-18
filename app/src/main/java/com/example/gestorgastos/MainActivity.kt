@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewModel: GastoViewModel
 
     private lateinit var adapterLista: GastoAdapter
-    // NUEVO: Guardamos referencia al adaptador del calendario para poder recargarlo
+
     private var adapterCalendario: CalendarioAdapter? = null
 
     enum class Vista { LISTA, CALENDARIO, GRAFICA }
@@ -53,21 +53,53 @@ class MainActivity : AppCompatActivity() {
     private var uriFotoFinal: String? = null
     private var ivPreviewActual: android.widget.ImageView? = null
     private var progressDialog: AlertDialog? = null
+    // Variable para guardar las categorías actuales (Nombre -> Foto)
+    private var mapaCategoriasActual: Map<String, String?> = emptyMap()
+    // Lista solo de nombres para el Spinner
+    private var listaNombresCategorias: List<String> = emptyList()
 
     // --- LANZADORES ---
     private val requestCameraPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
         if (isGranted) abrirCamara() else Toast.makeText(this, "Permiso necesario", Toast.LENGTH_SHORT).show()
     }
+    // LANZADOR CÁMARA
     private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && uriFotoTemporal != null) {
             uriFotoFinal = uriFotoTemporal.toString()
-            ivPreviewActual?.let { Glide.with(this).load(uriFotoFinal).centerCrop().into(it) }
+            ivPreviewActual?.let {
+                // 1. Cargar la foto
+                Glide.with(this).load(uriFotoFinal).centerCrop().into(it)
+
+                // 2. AJUSTES VISUALES
+                it.setPadding(0, 0, 0, 0)
+                it.clearColorFilter()
+                it.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+
+                // 3. Mostrar la X roja
+                // Truco para buscar el botón hermano en el layout
+                val parent = it.parent as? android.view.ViewGroup
+                parent?.findViewById<View>(R.id.btnBorrarFoto)?.visibility = View.VISIBLE
+            }
         }
     }
+
+    // LANZADOR GALERÍA
     private val pickGalleryLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             uriFotoFinal = uri.toString()
-            ivPreviewActual?.let { Glide.with(this).load(uriFotoFinal).centerCrop().into(it) }
+            ivPreviewActual?.let {
+                // 1. Cargar la foto
+                Glide.with(this).load(uriFotoFinal).centerCrop().into(it)
+
+                // 2. AJUSTES VISUALES
+                it.setPadding(0, 0, 0, 0)
+                it.clearColorFilter()
+                it.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+
+                // 3. Mostrar la X roja
+                val parent = it.parent as? android.view.ViewGroup
+                parent?.findViewById<View>(R.id.btnBorrarFoto)?.visibility = View.VISIBLE
+            }
         }
     }
 
@@ -105,6 +137,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnExportar.setOnClickListener { mostrarMenuFormatoExportacion() }
         binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
         binding.btnMesSiguiente.setOnClickListener { viewModel.mesSiguiente() }
+        binding.btnCategorias.setOnClickListener {
+            val intent = android.content.Intent(this, com.example.gestorgastos.ui.CategoriasActivity::class.java)
+            startActivity(intent)
+        }
 
         binding.btnCambiarVista.setOnClickListener { view ->
             val popup = PopupMenu(this, view)
@@ -166,6 +202,24 @@ class MainActivity : AppCompatActivity() {
         viewModel.notificarCambioLimites.observe(this) {
             val total = viewModel.sumaTotalDelMes.value ?: 0.0
             actualizarTotalYColor(total)
+        }
+
+        // OBSERVER CATEGORÍAS
+        viewModel.listaCategorias.observe(this) { lista ->
+            // 1. Si está vacía (primera vez), creamos las básicas
+            if (lista.isEmpty()) {
+                viewModel.inicializarCategoriasPorDefecto()
+            }
+
+            // 2. Preparamos los datos
+            // Creamos un mapa: "Comida" -> "content://foto..."
+            mapaCategoriasActual = lista.associate { it.nombre to it.uriFoto }
+            // Creamos lista de nombres para los Spinners: ["Comida", "Casa", ...]
+            listaNombresCategorias = lista.map { it.nombre }
+
+            // 3. Actualizamos el adaptador de la lista principal
+            adapterLista.mapaCategorias = mapaCategoriasActual
+            adapterLista.notifyDataSetChanged()
         }
     }
 
@@ -298,7 +352,7 @@ class MainActivity : AppCompatActivity() {
         val adapterSpinner = android.widget.ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
-            com.example.gestorgastos.ui.CategoriasHelper.listaCategorias
+            listaNombresCategorias
         )
         adapterSpinner.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         dialogBinding.spinnerCategoria.adapter = adapterSpinner
@@ -307,12 +361,30 @@ class MainActivity : AppCompatActivity() {
         dialogBinding.etCantidad.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etCantidad))
         dialogBinding.btnCamara.setOnClickListener { checkCameraPermissionAndOpen() }
         dialogBinding.btnGaleria.setOnClickListener { pickGalleryLauncher.launch("image/*") }
+        dialogBinding.btnBorrarFoto.setOnClickListener {
+            uriFotoFinal = null
+
+            // Restaurar icono de cámara
+            dialogBinding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera)
+            dialogBinding.ivPreviewFoto.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+
+            // Restaurar padding (usando dimens)
+            val padding = resources.getDimensionPixelSize(com.example.gestorgastos.R.dimen.preview_padding_small)
+            dialogBinding.ivPreviewFoto.setPadding(padding, padding, padding, padding)
+
+            // Restaurar el tinte GRIS (Importante)
+            dialogBinding.ivPreviewFoto.setColorFilter(android.graphics.Color.parseColor("#888888"))
+
+            dialogBinding.btnBorrarFoto.visibility = android.view.View.GONE
+        }
         builder.setView(dialogBinding.root)
         builder.setPositiveButton("Guardar") { _, _ ->
             val nombre = dialogBinding.etNombre.text.toString()
             val cantidadStr = dialogBinding.etCantidad.text.toString().replace(".", "").replace(",", ".")
             val descripcion = dialogBinding.etDescripcion.text.toString()
-            val categoriaSeleccionada = dialogBinding.spinnerCategoria.selectedItem.toString()
+            val categoriaSeleccionada = if (listaNombresCategorias.isNotEmpty()) {
+                dialogBinding.spinnerCategoria.selectedItem.toString()
+            } else "Otros"
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cantidadNueva = cantidadStr.toDoubleOrNull() ?: 0.0
@@ -338,14 +410,14 @@ class MainActivity : AppCompatActivity() {
         val adapterSpinner = android.widget.ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
-            com.example.gestorgastos.ui.CategoriasHelper.listaCategorias
+            listaNombresCategorias
         )
         adapterSpinner.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         dialogBinding.spinnerCategoria.adapter = adapterSpinner
 
         // 2. PRE-SELECCIONAR LA CATEGORÍA QUE YA TIENE EL GASTO
         // Buscamos en qué posición de la lista está (ej: "Casa" es la posición 2)
-        val posicionActual = com.example.gestorgastos.ui.CategoriasHelper.listaCategorias.indexOf(gasto.categoria)
+        val posicionActual = listaNombresCategorias.indexOf(gasto.categoria)
         if (posicionActual >= 0) {
             dialogBinding.spinnerCategoria.setSelection(posicionActual)
         }
@@ -355,12 +427,24 @@ class MainActivity : AppCompatActivity() {
         dialogBinding.etCantidad.setText(gasto.cantidad.toString().replace(".", ","))
         dialogBinding.etCantidad.addTextChangedListener(com.example.gestorgastos.ui.EuroTextWatcher(dialogBinding.etCantidad))
         dialogBinding.etDescripcion.setText(gasto.descripcion)
+        dialogBinding.btnBorrarFoto.setOnClickListener {
+            uriFotoFinal = null
+            dialogBinding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera)
+            dialogBinding.ivPreviewFoto.setPadding(60,60,60,60) // Restaurar padding visual
+            dialogBinding.btnBorrarFoto.visibility = android.view.View.GONE
+        }
+
 
         uriFotoFinal = gasto.uriFoto
         ivPreviewActual = dialogBinding.ivPreviewFoto
 
+        // ... Cargar foto existente ...
         if (uriFotoFinal != null) {
             Glide.with(this).load(uriFotoFinal).centerCrop().into(dialogBinding.ivPreviewFoto)
+            dialogBinding.ivPreviewFoto.setPadding(0,0,0,0)
+            dialogBinding.btnBorrarFoto.visibility = android.view.View.VISIBLE
+        } else {
+            dialogBinding.btnBorrarFoto.visibility = android.view.View.GONE
         }
 
         dialogBinding.btnCamara.setOnClickListener { checkCameraPermissionAndOpen() }
@@ -374,7 +458,9 @@ class MainActivity : AppCompatActivity() {
             val descripcion = dialogBinding.etDescripcion.text.toString()
 
             // 3. LEER LA CATEGORÍA SELECCIONADA (Puede haber cambiado)
-            val nuevaCategoria = dialogBinding.spinnerCategoria.selectedItem.toString()
+            val nuevaCategoria = if (listaNombresCategorias.isNotEmpty()) {
+                dialogBinding.spinnerCategoria.selectedItem.toString()
+            } else gasto.categoria
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cantidad = cantidadStr.toDoubleOrNull() ?: 0.0

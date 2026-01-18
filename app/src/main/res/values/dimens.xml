@@ -15,4 +15,8 @@
     <dimen name="button_height">56dp</dimen>
     <dimen name="icon_size">24dp</dimen>
     <dimen name="image_preview_height">200dp</dimen>
+    <dimen name="preview_padding_empty">60dp</dimen>
+    <dimen name="preview_square_size">100dp</dimen>
+    <dimen name="preview_padding_small">25dp</dimen>
+    <dimen name="icon_close_size">24dp</dimen>
 </resources>

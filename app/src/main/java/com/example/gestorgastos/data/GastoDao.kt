@@ -31,4 +31,18 @@ interface GastoDao {
     // Obtener la suma total de un rango de fechas (para tus alertas Amarilla/Roja)
     @Query("SELECT SUM(cantidad) FROM tabla_gastos WHERE fecha >= :fechaInicio AND fecha <= :fechaFin")
     fun obtenerSumaGastos(fechaInicio: Long, fechaFin: Long): Flow<Double?>
+
+    // --- MÉTODOS PARA CATEGORÍAS ---
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertarCategoria(categoria: Categoria)
+
+    @androidx.room.Delete
+    suspend fun borrarCategoria(categoria: Categoria)
+
+    @androidx.room.Query("SELECT * FROM tabla_categorias ORDER BY nombre ASC")
+    fun obtenerCategorias(): kotlinx.coroutines.flow.Flow<List<Categoria>>
+
+    // Actualiza el nombre de la categoría en todos los gastos que la tengan
+    @androidx.room.Query("UPDATE tabla_gastos SET categoria = :nuevoNombre WHERE categoria = :viejoNombre")
+    suspend fun actualizarCategoriaEnGastos(viejoNombre: String, nuevoNombre: String)
 }

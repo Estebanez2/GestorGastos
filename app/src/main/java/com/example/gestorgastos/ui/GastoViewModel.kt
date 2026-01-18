@@ -7,6 +7,7 @@ import androidx.lifecycle.asLiveData
 import androidx.lifecycle.viewModelScope
 import com.example.gestorgastos.R
 import com.example.gestorgastos.data.AppDatabase
+import com.example.gestorgastos.data.Categoria
 import com.example.gestorgastos.data.Gasto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,9 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
         val (inicio, fin) = obtenerRangoFechas(mes)
         dao.obtenerSumaGastos(inicio, fin)
     }.asLiveData()
+
+    // --- LÓGICA DE CATEGORÍAS ---
+    val listaCategorias: androidx.lifecycle.LiveData<List<Categoria>> = dao.obtenerCategorias().asLiveData()
 
     // --- FUNCIONES DE ACCIÓN ---
 
@@ -106,5 +110,43 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun mesSiguiente() {
         _mesSeleccionado.value = _mesSeleccionado.value.plusMonths(1)
+    }
+
+    // Función para crear las categorías por defecto si la lista está vacía (opcional pero recomendado)
+    fun inicializarCategoriasPorDefecto() {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Solo si no hay ninguna, creamos unas básicas sin foto (saldrá icono por defecto)
+            // Esto es un truco rápido, idealmente comprobaríamos count()
+            dao.insertarCategoria(Categoria("Comida", null))
+            dao.insertarCategoria(Categoria("Transporte", null))
+            dao.insertarCategoria(Categoria("Casa", null))
+            dao.insertarCategoria(Categoria("Otros", null))
+        }
+    }
+
+    fun agregarNuevaCategoria(nombre: String, uriFoto: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.insertarCategoria(Categoria(nombre, uriFoto))
+        }
+    }
+
+    fun editarCategoria(viejoNombre: String, nuevoNombre: String, nuevaUriFoto: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // A. Creamos la nueva
+            dao.insertarCategoria(Categoria(nuevoNombre, nuevaUriFoto))
+
+            // B. Si el nombre cambió, actualizamos los gastos antiguos
+            if (viejoNombre != nuevoNombre) {
+                dao.actualizarCategoriaEnGastos(viejoNombre, nuevoNombre)
+                // C. Borramos la vieja
+                dao.borrarCategoria(Categoria(viejoNombre, null))
+            }
+        }
+    }
+
+    fun borrarCategoria(categoria: Categoria) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.borrarCategoria(categoria)
+        }
     }
 }

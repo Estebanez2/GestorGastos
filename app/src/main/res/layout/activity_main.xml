@@ -17,6 +17,14 @@
         android:layout_margin="@dimen/margin_medium">
 
         <ImageButton
+            android:id="@+id/btnCategorias"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_sort_by_size"
+            app:tint="@color/black" />
+
+        <ImageButton
             android:id="@+id/btnExportar"
             android:layout_width="48dp"
             android:layout_height="48dp"
