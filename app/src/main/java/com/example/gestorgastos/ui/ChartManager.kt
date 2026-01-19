@@ -135,11 +135,12 @@ class ChartManager(
         }
     }
 
-    fun actualizarPieChart(listaGastos: List<Gasto>) {
+    fun actualizarPieChart(listaGastos: List<Gasto>, categoriaSeleccionada: String?) {
         if (listaGastos.isEmpty()) {
             pieChart.clear()
             return
         }
+
         val mapaCategorias = listaGastos.groupBy { it.categoria }
             .mapValues { entry -> entry.value.sumOf { it.cantidad } }
 
@@ -151,9 +152,7 @@ class ChartManager(
         val dataSet = PieDataSet(entradas, "").apply {
             sliceSpace = 3f
             selectionShift = 5f
-            colors = ColorTemplate.MATERIAL_COLORS.toList() +
-                    ColorTemplate.JOYFUL_COLORS.toList() +
-                    ColorTemplate.COLORFUL_COLORS.toList()
+            colors = ColorTemplate.MATERIAL_COLORS.toList() + ColorTemplate.JOYFUL_COLORS.toList() + ColorTemplate.COLORFUL_COLORS.toList()
             yValuePosition = PieDataSet.ValuePosition.OUTSIDE_SLICE
             xValuePosition = PieDataSet.ValuePosition.OUTSIDE_SLICE
             valueLineColor = Color.BLACK
@@ -172,8 +171,31 @@ class ChartManager(
         }
 
         pieChart.data = data
+
+        // LÓGICA DE PERSISTENCIA (Movida desde el Main)
+        if (categoriaSeleccionada != null) {
+            val index = entradas.indexOfFirst { it.label == categoriaSeleccionada }
+            if (index != -1) {
+                pieChart.highlightValue(index.toFloat(), 0, false)
+                val total = entradas[index].value.toDouble()
+                pieChart.centerText = "$categoriaSeleccionada\n${Formato.formatearMoneda(total)}"
+                pieChart.setCenterTextSize(16f)
+                pieChart.setCenterTextColor(Color.BLACK)
+            } else {
+                resetearTextoCentro()
+                onCategorySelected(null) // Avisamos que se ha perdido la selección
+            }
+        } else {
+            resetearTextoCentro()
+        }
+
+        pieChart.invalidate()
+    }
+
+    private fun resetearTextoCentro() {
         pieChart.highlightValues(null)
         pieChart.centerText = "Gastos\nPor Categoría"
-        pieChart.invalidate()
+        pieChart.setCenterTextSize(14f)
+        pieChart.setCenterTextColor(Color.GRAY)
     }
 }

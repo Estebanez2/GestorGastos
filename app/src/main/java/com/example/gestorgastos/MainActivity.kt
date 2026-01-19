@@ -165,17 +165,26 @@ class MainActivity : AppCompatActivity() {
             adapterCalendario = CalendarioAdapter(mes, lista)
             binding.rvCalendario.adapter = adapterCalendario
 
+            // DELEGAMOS AL MANAGER
             chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
-            chartManager.actualizarPieChart(lista)
+
+            // CORRECCIÓN: Pasamos 'categoriaSeleccionada' para que el gráfico recuerde qué estaba pulsado
+            chartManager.actualizarPieChart(lista, categoriaSeleccionada)
 
             binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
         }
 
         viewModel.sumaTotalDelMes.observe(this) { total -> actualizarTotalUI(total ?: 0.0) }
+
         viewModel.notificarCambioLimites.observe(this) {
             actualizarTotalUI(viewModel.sumaTotalDelMes.value ?: 0.0)
             adapterLista.notifyDataSetChanged()
-            chartManager.actualizarPieChart(viewModel.gastosDelMes.value ?: emptyList())
+
+            // CORRECCIÓN: Avisamos también a la lista de categorías sobre el cambio de moneda
+            adapterGastosCategoria.notifyDataSetChanged()
+
+            // Refrescamos el gráfico para que actualice los textos de moneda
+            chartManager.actualizarPieChart(viewModel.gastosDelMes.value ?: emptyList(), categoriaSeleccionada)
         }
 
         viewModel.listaCategorias.observe(this) { lista ->
@@ -240,9 +249,9 @@ class MainActivity : AppCompatActivity() {
         uriFotoFinal = null // Reset
 
         val dialog = dialogManager.mostrarAgregarGasto(
-            categorias, null,
+            categorias, null, // Pasamos null porque la foto la gestiona el Main
             onGuardar = { nombre, cant, desc, cat ->
-                // USAMOS uriFotoFinal LOCAL, que es la correcta tras hacer la foto
+                // Usamos 'uriFotoFinal' que es la variable local del Main
                 viewModel.agregarGasto(nombre, cant, desc, uriFotoFinal, cat)
                 val total = (viewModel.sumaTotalDelMes.value ?: 0.0) + cant
                 binding.viewFlashBorde.flashEffect(viewModel.obtenerColorAlerta(total))
@@ -339,24 +348,6 @@ class MainActivity : AppCompatActivity() {
             iv.clearColorFilter()
             iv.setOnClickListener { ImageZoomHelper.mostrarImagen(this, uriFotoFinal) }
             (iv.parent as? View)?.findViewById<View>(R.id.btnBorrarFoto)?.visibility = View.VISIBLE
-        }
-    }
-
-    // --- COPIAR IMAGEN (USANDO FILEPROVIDER) ---
-    private fun copiarImagenAInternalStorage(uriExterna: android.net.Uri): String {
-        return try {
-            val archivoDestino = File(filesDir, "img_${System.currentTimeMillis()}.jpg")
-            val inputStream = contentResolver.openInputStream(uriExterna)
-            val outputStream = java.io.FileOutputStream(archivoDestino)
-            inputStream?.copyTo(outputStream)
-            inputStream?.close()
-            outputStream.close()
-
-            // Usamos FileProvider porque configuramos el XML correctamente
-            FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivoDestino).toString()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            uriExterna.toString()
         }
     }
 }

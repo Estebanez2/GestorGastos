@@ -2,11 +2,14 @@ package com.example.gestorgastos.ui
 
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.view.View
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.example.gestorgastos.R
+import java.io.File
 
 /**
  * ANIMACIONES
@@ -67,5 +70,21 @@ fun Activity.ejecutarConPermisoCamara(
         onGranted()
     } else {
         onDenied()
+    }
+}
+
+fun android.content.Context.copiarImagenAInternalStorage(uriExterna: Uri): String {
+    return try {
+        val archivoDestino = File(filesDir, "img_${System.currentTimeMillis()}.jpg")
+        contentResolver.openInputStream(uriExterna)?.use { input ->
+            java.io.FileOutputStream(archivoDestino).use { output ->
+                input.copyTo(output)
+            }
+        }
+        // Devuelve la URI segura generada por FileProvider
+        FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivoDestino).toString()
+    } catch (e: Exception) {
+        e.printStackTrace()
+        uriExterna.toString()
     }
 }
