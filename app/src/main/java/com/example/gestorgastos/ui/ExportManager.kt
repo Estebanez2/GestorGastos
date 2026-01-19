@@ -37,13 +37,14 @@ class ExportManager(
         }
     }
 
-    // Clase de datos para pasar las vistas necesarias sin ensuciar los argumentos
+    // CAMBIO 1: Añadimos 'layoutVistaCategorias' a la clase de datos
     data class VistasCaptura(
         val cardResumen: View,
         val layoutNavegacion: View,
         val chartBarras: BarChart,
         val chartQuesitos: PieChart,
-        val rvCalendario: View
+        val rvCalendario: View,
+        val layoutVistaCategorias: View // <--- NUEVO CAMPO
     )
 
     private fun mostrarMenuFormato(onFormatoElegido: (Boolean) -> Unit) {
@@ -83,7 +84,10 @@ class ExportManager(
             // Capturas simples (Gráficas o Calendario)
             val bitmapCaptura = when (vistaActual) {
                 MainActivity.Vista.GRAFICA -> vistas.chartBarras.chartBitmap
-                MainActivity.Vista.QUESITOS -> vistas.chartQuesitos.chartBitmap
+
+                // CAMBIO 2: En lugar de capturar solo el chart, capturamos TODO el layout (Chart + Lista)
+                MainActivity.Vista.QUESITOS -> ExportarHelper.capturarVista(vistas.layoutVistaCategorias)
+
                 MainActivity.Vista.CALENDARIO -> ExportarHelper.capturarVista(vistas.rvCalendario)
                 else -> null
             }

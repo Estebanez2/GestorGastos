@@ -127,7 +127,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnConfig.setOnClickListener { mostrarDialogoConfiguracion() }
 
         binding.btnExportar.setOnClickListener {
-            val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario)
+            val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
             exportManager.iniciarProcesoExportacion(vistaActual, viewModel.gastosDelMes.value ?: emptyList(), vistas)
         }
 
@@ -308,7 +308,7 @@ class MainActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, "Borrado", Snackbar.LENGTH_LONG).setAction("Deshacer") {
                     if (!deshacerPulsado) {
                         deshacerPulsado = true
-                        viewModel.agregarGasto(gasto.nombre, gasto.cantidad, gasto.descripcion, gasto.uriFoto, gasto.categoria)
+                        viewModel.agregarGasto(gasto.nombre, gasto.cantidad, gasto.descripcion, gasto.uriFoto, gasto.categoria, gasto.fecha)
                     }
                 }.show()
             }

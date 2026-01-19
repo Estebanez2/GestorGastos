@@ -60,15 +60,23 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
         notificarCambioLimites.value = true
     }
 
-       fun agregarGasto(nombre: String, cantidad: Double, descripcion: String, uriFoto: String?, categoria: String) {
+    fun agregarGasto(
+        nombre: String,
+        cantidad: Double,
+        descripcion: String,
+        uriFoto: String?,
+        categoria: String,
+        fecha: Long = System.currentTimeMillis()
+    ) {
         val nuevoGasto = Gasto(
             nombre = nombre,
             cantidad = cantidad,
             descripcion = descripcion,
-            fecha = System.currentTimeMillis(),
+            fecha = fecha,
             uriFoto = uriFoto,
             categoria = categoria
         )
+
         viewModelScope.launch(Dispatchers.IO) {
             dao.insertarGasto(nuevoGasto)
         }
