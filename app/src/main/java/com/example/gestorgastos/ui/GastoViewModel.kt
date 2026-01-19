@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 import java.time.ZoneId
-
+import com.example.gestorgastos.data.ModoFiltroFecha
 class GastoViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -45,33 +45,37 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
     }.flatMapLatest { (mes, filtro) ->
 
         if (filtro != null) {
-            // AQUI ESTÁ EL ARREGLO DE PRIORIDADES
 
-            // 1. SI "BUSCAR EN TODO" ESTÁ ACTIVO -> IGNORAMOS CUALQUIER FECHA O MES
-            if (filtro.buscarEnTodo) {
-                return@flatMapLatest dao.buscarGastosAvanzado(
-                    filtro.nombre, filtro.descripcion, filtro.categoria,
-                    filtro.precioMin, filtro.precioMax,
-                    0L, Long.MAX_VALUE // Desde el principio hasta el fin de los tiempos
-                )
+            // DECIDIMOS EL RANGO SEGÚN EL MODO ELEGIDO
+            val (inicio, fin) = when (filtro.modoFecha) {
+
+                ModoFiltroFecha.TODOS -> {
+                    // Modo Histórico: Desde 0 al infinito
+                    Pair(0L, Long.MAX_VALUE)
+                }
+
+                ModoFiltroFecha.RANGO_FECHAS -> {
+                    // Modo Absoluto: Usamos las fechas del DatePicker (si existen)
+                    // (Ya están validadas en el Manager, pero por seguridad usamos 0L si es null)
+                    val ini = filtro.fechaInicioAbs ?: 0L
+                    val fin = filtro.fechaFinAbs ?: Long.MAX_VALUE
+                    Pair(ini, fin)
+                }
+
+                ModoFiltroFecha.MES_ACTUAL -> {
+                    // Modo Relativo: Usamos el mes actual + los días 1-31 elegidos
+                    obtenerRangoFechasConDias(mes, filtro.diaInicio, filtro.diaFin)
+                }
             }
 
-            // 2. SI NO BUSCA EN TODO -> USAMOS EL MES ACTUAL + DÍAS DEL FILTRO
-            // Calculamos inicio y fin basándonos en el mes que estamos viendo AHORA MISMO
-            val rango = obtenerRangoFechasConDias(mes, filtro.diaInicio, filtro.diaFin)
-
             dao.buscarGastosAvanzado(
-                filtro.nombre,
-                filtro.descripcion,
-                filtro.categoria,
-                filtro.precioMin,
-                filtro.precioMax,
-                rango.first, // Inicio calculado para este mes
-                rango.second // Fin calculado para este mes
+                filtro.nombre, filtro.descripcion, filtro.categoria,
+                filtro.precioMin, filtro.precioMax,
+                inicio, fin
             )
 
         } else {
-            // 3. SIN FILTRO -> MES COMPLETO
+            // Sin filtro -> Mes completo normal
             val (inicio, fin) = obtenerRangoFechas(mes)
             dao.obtenerGastosPorMes(inicio, fin)
         }

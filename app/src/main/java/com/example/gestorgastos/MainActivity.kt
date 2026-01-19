@@ -168,6 +168,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupObservers() {
         // 1. OBSERVER PRINCIPAL (Sincronizado)
         viewModel.gastosVisibles.observe(this) { lista ->
+            // A. Actualizar datos en adaptadores y totales
             adapterLista.submitList(lista)
 
             val totalCalculado = lista.sumOf { it.cantidad }
@@ -181,32 +182,44 @@ class MainActivity : AppCompatActivity() {
 
             chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
             chartManager.actualizarPieChart(lista, categoriaSeleccionada)
-            
-            // 1. Preparamos el nombre del mes siempre (Ej: "Enero 2026")
+
+            // B. Lógica del TÍTULO (Aquí integramos los 3 modos de fecha)
+
+            // Preparamos el nombre del mes base (Ej: "Enero 2026")
             val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
             val nombreMes = viewModel.mesActual.value?.format(formatter)?.replaceFirstChar { it.uppercase() } ?: ""
 
             if (viewModel.estaBuscando()) {
-                // Hay filtro activo
+                // HAY FILTRO ACTIVO
                 val filtro = viewModel.filtroActualValue
 
-                if (filtro?.buscarEnTodo == true) {
-                    // Si busca en todo el historial, el mes da igual
-                    binding.tvMesTitulo.text = "Resultados Globales (${lista.size})"
-                } else {
-                    // Si busca DENTRO del mes, mostramos: "Enero 2026 (5)"
-                    binding.tvMesTitulo.text = "$nombreMes (${lista.size})"
+                // Decidimos el título según el MODO de fecha elegido
+                when (filtro?.modoFecha) {
+                    com.example.gestorgastos.data.ModoFiltroFecha.TODOS -> {
+                        binding.tvMesTitulo.text = "Historial Completo (${lista.size})"
+                    }
+                    com.example.gestorgastos.data.ModoFiltroFecha.RANGO_FECHAS -> {
+                        // Formateamos las fechas: "01/02/25 - 15/03/25 (X)"
+                        val sdf = java.text.SimpleDateFormat("dd/MM/yy", Locale.getDefault())
+                        val ini = filtro.fechaInicioAbs?.let { sdf.format(java.util.Date(it)) } ?: "?"
+                        val fin = filtro.fechaFinAbs?.let { sdf.format(java.util.Date(it)) } ?: "?"
+                        binding.tvMesTitulo.text = "$ini - $fin (${lista.size})"
+                    }
+                    else -> {
+                        // MODO MES ACTUAL (con o sin días filtrados 1-31)
+                        // Muestra "Enero 2026 (X)"
+                        binding.tvMesTitulo.text = "$nombreMes (${lista.size})"
+                    }
                 }
 
-                binding.tvVacio.text = "No hay resultados con este filtro"
-                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_manage) // Engranaje/Filtro
+                binding.tvVacio.text = "Sin resultados con este filtro"
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_manage) // Icono engranaje
 
             } else {
-                // Modo normal, solo el mes
+                // MODO NORMAL (Sin buscar nada)
                 binding.tvMesTitulo.text = nombreMes
-
                 binding.tvVacio.text = "No hay gastos este mes"
-                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search) // Lupa
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search) // Icono lupa
             }
 
             // Visibilidad del mensaje "Vacío"
