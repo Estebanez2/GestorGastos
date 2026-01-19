@@ -6,7 +6,7 @@ data class FiltroBusqueda(
     val categoria: String? = null,
     val precioMin: Double? = null,
     val precioMax: Double? = null,
-    val fechaInicio: Long? = null,
-    val fechaFin: Long? = null,
+    val diaInicio: Int? = null,
+    val diaFin: Int? = null,
     val buscarEnTodo: Boolean = false
 )

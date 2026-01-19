@@ -170,7 +170,6 @@ class MainActivity : AppCompatActivity() {
         viewModel.gastosVisibles.observe(this) { lista ->
             adapterLista.submitList(lista)
 
-            // Calculamos total sobre la lista nueva (SIN usar adapter.currentList)
             val totalCalculado = lista.sumOf { it.cantidad }
             actualizarTotalUI(totalCalculado)
 
@@ -182,22 +181,36 @@ class MainActivity : AppCompatActivity() {
 
             chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
             chartManager.actualizarPieChart(lista, categoriaSeleccionada)
+            
+            // 1. Preparamos el nombre del mes siempre (Ej: "Enero 2026")
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
+            val nombreMes = viewModel.mesActual.value?.format(formatter)?.replaceFirstChar { it.uppercase() } ?: ""
 
-            // Lógica UI (Títulos e iconos)
             if (viewModel.estaBuscando()) {
-                binding.tvMesTitulo.text = "Filtro activo (${lista.size})"
-                binding.tvVacio.text = "Sin resultados"
-                // Icono engranaje/filtro para indicar que se puede modificar
-                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_manage)
-                binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
+                // Hay filtro activo
+                val filtro = viewModel.filtroActualValue
+
+                if (filtro?.buscarEnTodo == true) {
+                    // Si busca en todo el historial, el mes da igual
+                    binding.tvMesTitulo.text = "Resultados Globales (${lista.size})"
+                } else {
+                    // Si busca DENTRO del mes, mostramos: "Enero 2026 (5)"
+                    binding.tvMesTitulo.text = "$nombreMes (${lista.size})"
+                }
+
+                binding.tvVacio.text = "No hay resultados con este filtro"
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_manage) // Engranaje/Filtro
+
             } else {
-                val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
-                val textoMes = viewModel.mesActual.value?.format(formatter)?.replaceFirstChar { it.uppercase() }
-                binding.tvMesTitulo.text = textoMes
+                // Modo normal, solo el mes
+                binding.tvMesTitulo.text = nombreMes
+
                 binding.tvVacio.text = "No hay gastos este mes"
-                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search)
-                binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search) // Lupa
             }
+
+            // Visibilidad del mensaje "Vacío"
+            binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
         }
 
         // 2. TÍTULO MES (Solo visual)

@@ -37,39 +37,63 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
 
     var limiteAmarillo: Double = prefs.obtenerAmarillo()
     var limiteRojo: Double = prefs.obtenerRojo()
+    val listaCategorias: LiveData<List<Categoria>> = dao.obtenerCategorias().asLiveData()
 
     // --- LÓGICA CENTRAL ---
     val gastosVisibles: LiveData<List<Gasto>> = combine(_mesSeleccionado, _filtroActual) { mes, filtro ->
         Pair(mes, filtro)
     }.flatMapLatest { (mes, filtro) ->
+
         if (filtro != null) {
-            // LÓGICA INTELIGENTE DE FECHAS
-            val (inicio, fin) = when {
-                // A. Usuario eligió fechas manuales
-                filtro.fechaInicio != null && filtro.fechaFin != null -> Pair(filtro.fechaInicio, filtro.fechaFin)
-                // B. Usuario marcó "Buscar en todo"
-                filtro.buscarEnTodo -> Pair(0L, Long.MAX_VALUE)
-                // C. Por defecto: buscamos dentro del mes que se ve en pantalla
-                else -> obtenerRangoFechas(mes)
+            // AQUI ESTÁ EL ARREGLO DE PRIORIDADES
+
+            // 1. SI "BUSCAR EN TODO" ESTÁ ACTIVO -> IGNORAMOS CUALQUIER FECHA O MES
+            if (filtro.buscarEnTodo) {
+                return@flatMapLatest dao.buscarGastosAvanzado(
+                    filtro.nombre, filtro.descripcion, filtro.categoria,
+                    filtro.precioMin, filtro.precioMax,
+                    0L, Long.MAX_VALUE // Desde el principio hasta el fin de los tiempos
+                )
             }
+
+            // 2. SI NO BUSCA EN TODO -> USAMOS EL MES ACTUAL + DÍAS DEL FILTRO
+            // Calculamos inicio y fin basándonos en el mes que estamos viendo AHORA MISMO
+            val rango = obtenerRangoFechasConDias(mes, filtro.diaInicio, filtro.diaFin)
 
             dao.buscarGastosAvanzado(
                 filtro.nombre,
-                filtro.descripcion, // Nuevo
+                filtro.descripcion,
                 filtro.categoria,
                 filtro.precioMin,
                 filtro.precioMax,
-                inicio,
-                fin
+                rango.first, // Inicio calculado para este mes
+                rango.second // Fin calculado para este mes
             )
+
         } else {
-            // SIN FILTRO: Mes normal
+            // 3. SIN FILTRO -> MES COMPLETO
             val (inicio, fin) = obtenerRangoFechas(mes)
             dao.obtenerGastosPorMes(inicio, fin)
         }
     }.asLiveData()
 
-    val listaCategorias: LiveData<List<Categoria>> = dao.obtenerCategorias().asLiveData()
+    // Helper para calcular fechas completas (Milisegundos) desde un día simple (1-31)
+    private fun obtenerRangoFechasConDias(mes: YearMonth, diaInicio: Int?, diaFin: Int?): Pair<Long, Long> {
+        // Si no puso días, cogemos el mes entero (1 al último día del mes)
+        val dInicio = diaInicio ?: 1
+        // Si puso día fin, usamos ese. Si no, usamos el último día del mes real
+        val dFin = diaFin ?: mes.lengthOfMonth()
+
+        // PROTECCIÓN: Si estamos en Febrero (28 días) y el filtro dice "Día 30",
+        // ajustamos dFin a 28 para que no de error.
+        val dInicioReales = dInicio.coerceAtMost(mes.lengthOfMonth())
+        val dFinReales = dFin.coerceAtMost(mes.lengthOfMonth())
+
+        val inicioMilis = mes.atDay(dInicioReales).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val finMilis = mes.atDay(dFinReales).atTime(23, 59, 59, 999999999).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        return Pair(inicioMilis, finMilis)
+    }
 
     // --- ACCIONES ---
     fun aplicarFiltro(filtro: FiltroBusqueda) { _filtroActual.value = filtro }
