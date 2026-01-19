@@ -17,6 +17,19 @@
         android:layout_margin="@dimen/margin_medium">
 
         <ImageButton
+            android:id="@+id/btnBuscar"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_search"
+            android:contentDescription="Buscar"
+            app:tint="@color/black"
+            app:layout_constraintEnd_toStartOf="@+id/btnConfig"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            android:layout_marginEnd="8dp" />
+
+        <ImageButton
             android:id="@+id/btnCategorias"
             android:layout_width="48dp"
             android:layout_height="48dp"

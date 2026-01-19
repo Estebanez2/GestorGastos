@@ -33,16 +33,38 @@ interface GastoDao {
     fun obtenerSumaGastos(fechaInicio: Long, fechaFin: Long): Flow<Double?>
 
     // --- MÉTODOS PARA CATEGORÍAS ---
-    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
     suspend fun insertarCategoria(categoria: Categoria)
 
-    @androidx.room.Delete
+    @Delete
     suspend fun borrarCategoria(categoria: Categoria)
 
-    @androidx.room.Query("SELECT * FROM tabla_categorias ORDER BY nombre ASC")
+    @Query("SELECT * FROM tabla_categorias ORDER BY nombre ASC")
     fun obtenerCategorias(): kotlinx.coroutines.flow.Flow<List<Categoria>>
 
     // Actualiza el nombre de la categoría en todos los gastos que la tengan
-    @androidx.room.Query("UPDATE tabla_gastos SET categoria = :nuevoNombre WHERE categoria = :viejoNombre")
+    @Query("UPDATE tabla_gastos SET categoria = :nuevoNombre WHERE categoria = :viejoNombre")
     suspend fun actualizarCategoriaEnGastos(viejoNombre: String, nuevoNombre: String)
+
+    // CONSULTA DE BUSCADOR AVANZADO
+    // Si un parámetro es null, esa parte del filtro se ignora.
+    @androidx.room.Query("""
+        SELECT * FROM tabla_gastos 
+        WHERE (:nombre IS NULL OR LOWER(nombre) LIKE '%' || LOWER(:nombre) || '%' OR LOWER(descripcion) LIKE '%' || LOWER(:nombre) || '%')
+        AND (:categoria IS NULL OR categoria = :categoria)
+        AND (:precioMin IS NULL OR cantidad >= :precioMin)
+        AND (:precioMax IS NULL OR cantidad <= :precioMax)
+        AND (:fechaInicio IS NULL OR fecha >= :fechaInicio)
+        AND (:fechaFin IS NULL OR fecha <= :fechaFin)
+        ORDER BY fecha DESC
+    """)
+    fun buscarGastosAvanzado(
+        nombre: String?,
+        categoria: String?,
+        precioMin: Double?,
+        precioMax: Double?,
+        fechaInicio: Long?,
+        fechaFin: Long?
+    ): Flow<List<Gasto>>
+    // Usamos Flow para que si cambias un gasto buscado, se actualice en tiempo real
 }

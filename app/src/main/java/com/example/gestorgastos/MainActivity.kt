@@ -1,10 +1,6 @@
 package com.example.gestorgastos
 
-import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Color
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
 import android.widget.ImageView
 import android.widget.Toast
@@ -16,18 +12,13 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.ActivityMainBinding
 import com.example.gestorgastos.databinding.DialogConfiguracionBinding
 import com.example.gestorgastos.ui.* import com.github.mikephil.charting.animation.Easing
 import com.google.android.material.snackbar.Snackbar
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
@@ -42,6 +33,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var adapterLista: GastoAdapter
     private lateinit var adapterGastosCategoria: GastoAdapter
+    private lateinit var buscadorManager: BuscadorManager
     private var adapterCalendario: CalendarioAdapter? = null
 
     enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
@@ -98,7 +90,7 @@ class MainActivity : AppCompatActivity() {
             onGalleryRequested = { pickGalleryLauncher.launch("image/*") }
             onImageClick = { uri -> ImageZoomHelper.mostrarImagen(this@MainActivity, uri) }
         }
-
+        buscadorManager = BuscadorManager(this)
         exportManager = ExportManager(this, lifecycleScope)
     }
 
@@ -128,7 +120,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnExportar.setOnClickListener {
             val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
-            exportManager.iniciarProcesoExportacion(vistaActual, viewModel.gastosDelMes.value ?: emptyList(), vistas)
+            exportManager.iniciarProcesoExportacion(vistaActual, viewModel.gastosVisibles.value ?: emptyList(), vistas)
         }
 
         binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
@@ -149,44 +141,93 @@ class MainActivity : AppCompatActivity() {
             }
             popup.show()
         }
+        binding.btnBuscar.setOnClickListener {
+            if (viewModel.estaBuscando()) {
+                // Si ya hay búsqueda, el botón sirve para LIMPIAR
+                viewModel.limpiarFiltro()
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search) // Volver a icono lupa
+                Toast.makeText(this, "Filtro eliminado", Toast.LENGTH_SHORT).show()
+            } else {
+                // Si no, ABRIMOS EL BUSCADOR
+                val categorias = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
+
+                buscadorManager.mostrarBuscador(categorias) { filtro ->
+                    viewModel.aplicarFiltro(filtro)
+                    binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_close_clear_cancel) // Cambiar a icono X
+                }
+            }
+        }
     }
 
     private fun setupObservers() {
-        viewModel.mesActual.observe(this) { mes ->
-            val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
-            binding.tvMesTitulo.text = mes.format(formatter).replaceFirstChar { it.uppercase() }
-        }
 
-        viewModel.gastosDelMes.observe(this) { lista ->
+        // 1. EL OBSERVER PRINCIPAL (Hace todo el trabajo sucio)
+        viewModel.gastosVisibles.observe(this) { lista ->
+
+            // A. Actualizamos la lista visual
             adapterLista.submitList(lista)
+
+            // B. CALCULO DEL TOTAL (AQUÍ ESTÁ LA CLAVE DEL ARREGLO)
+            // Calculamos el total directamente de la lista que acaba de llegar (la nueva).
+            // No usamos 'adapter.currentList' ni otro observer separado.
+            val totalCalculado = lista.sumOf { it.cantidad }
+            actualizarTotalUI(totalCalculado)
+
+            // C. Filtros de Categorías y Gráficas
             filtrarListaCategorias()
 
+            // Calendario
             val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
             adapterCalendario = CalendarioAdapter(mes, lista)
             binding.rvCalendario.adapter = adapterCalendario
 
-            // DELEGAMOS AL MANAGER
+            // Gráficos (ChartManager)
             chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
-
-            // CORRECCIÓN: Pasamos 'categoriaSeleccionada' para que el gráfico recuerde qué estaba pulsado
             chartManager.actualizarPieChart(lista, categoriaSeleccionada)
 
-            binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
+            // D. Lógica visual (Título, Iconos, Vista vacía)
+            if (viewModel.estaBuscando()) {
+                binding.tvMesTitulo.text = "Resultados Búsqueda (${lista.size})"
+                binding.tvVacio.text = "No se encontraron gastos con ese filtro"
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
+            } else {
+                // Modo Normal: Título del Mes
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
+                val textoMes = viewModel.mesActual.value?.format(formatter)?.replaceFirstChar { it.uppercase() }
+                binding.tvMesTitulo.text = textoMes
+
+                binding.tvVacio.text = "No hay gastos este mes"
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search)
+
+                // Solo mostramos 'Vacio' si la lista es vacía Y estamos en vista de lista
+                binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
+            }
         }
 
-        viewModel.sumaTotalDelMes.observe(this) { total -> actualizarTotalUI(total ?: 0.0) }
+        // 2. SOLO OBSERVAMOS MES ACTUAL PARA ACTUALIZAR TÍTULO SI CAMBIA RÁPIDO
+        // (Opcional, pero ayuda a que el título cambie instantáneamente al pulsar la flecha)
+        viewModel.mesActual.observe(this) { mes ->
+            if (!viewModel.estaBuscando()) {
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
+                binding.tvMesTitulo.text = mes.format(formatter).replaceFirstChar { it.uppercase() }
+            }
+        }
 
+        // 3. CAMBIO DE LÍMITES (Configuración)
         viewModel.notificarCambioLimites.observe(this) {
-            actualizarTotalUI(viewModel.sumaTotalDelMes.value ?: 0.0)
+            // Aquí SÍ podemos usar gastosVisibles.value porque la lista no ha cambiado, solo los colores
+            val listaActual = viewModel.gastosVisibles.value ?: emptyList()
+            val total = listaActual.sumOf { it.cantidad }
+
+            actualizarTotalUI(total) // Recalcula el color del semáforo
+
+            // Refrescamos gráficas y listas para que pinten los nuevos colores
+            chartManager.actualizarBarChart(listaActual, viewModel.limiteRojo, viewModel.limiteAmarillo)
             adapterLista.notifyDataSetChanged()
-
-            // CORRECCIÓN: Avisamos también a la lista de categorías sobre el cambio de moneda
-            adapterGastosCategoria.notifyDataSetChanged()
-
-            // Refrescamos el gráfico para que actualice los textos de moneda
-            chartManager.actualizarPieChart(viewModel.gastosDelMes.value ?: emptyList(), categoriaSeleccionada)
         }
 
+        // 4. CATEGORÍAS (Fotos e iconos)
         viewModel.listaCategorias.observe(this) { lista ->
             if (lista.isEmpty()) viewModel.inicializarCategoriasPorDefecto()
             val mapa = lista.associate { it.nombre to it.uriFoto }
@@ -207,7 +248,9 @@ class MainActivity : AppCompatActivity() {
         when (vistaActual) {
             Vista.LISTA -> {
                 binding.rvGastos.visibility = View.VISIBLE
-                if (viewModel.gastosDelMes.value.isNullOrEmpty()) binding.tvVacio.visibility = View.VISIBLE
+                if (viewModel.gastosVisibles.value.isNullOrEmpty()) {
+                    binding.tvVacio.visibility = View.VISIBLE
+                }
             }
             Vista.CALENDARIO -> binding.rvCalendario.visibility = View.VISIBLE
             Vista.GRAFICA -> {
@@ -225,7 +268,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun filtrarListaCategorias() {
-        val todos = viewModel.gastosDelMes.value ?: emptyList()
+        val todos = viewModel.gastosVisibles.value ?: emptyList()
         if (categoriaSeleccionada != null) {
             adapterGastosCategoria.submitList(todos.filter { it.categoria == categoriaSeleccionada })
         } else {
