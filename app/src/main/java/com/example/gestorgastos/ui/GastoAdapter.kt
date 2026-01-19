@@ -1,5 +1,6 @@
 package com.example.gestorgastos.ui
 
+import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -27,51 +28,54 @@ class GastoAdapter(
 
     override fun onBindViewHolder(holder: GastoViewHolder, position: Int) {
         val gasto = getItem(position)
+        val context = holder.itemView.context
 
-        // ... (código de textos nombre, cantidad, fecha igual) ...
         holder.binding.tvNombre.text = gasto.nombre
         holder.binding.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
         val dateFormat = SimpleDateFormat("dd MMM", Locale("es", "ES"))
         holder.binding.tvFecha.text = dateFormat.format(Date(gasto.fecha))
 
-        // --- 1. ICONO CATEGORÍA (Con Zoom) ---
+        // --- FUNCIÓN DE SEGURIDAD INTERNA ---
+        fun esUriSegura(uri: String): Boolean {
+            return try {
+                context.contentResolver.openInputStream(Uri.parse(uri))?.close()
+                true
+            } catch (e: Exception) { false }
+        }
+
+        // --- 1. ICONO CATEGORÍA ---
         val uriCategoria = mapaCategorias[gasto.categoria]
+        val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
 
-        if (uriCategoria != null) {
-            // FOTO PERSONALIZADA
+        // Solo cargamos con Glide si existe la URI y es SEGURA
+        if (uriCategoria != null && esUriSegura(uriCategoria)) {
             holder.binding.ivIconoCategoria.clearColorFilter()
-            Glide.with(holder.itemView).load(uriCategoria).circleCrop().into(holder.binding.ivIconoCategoria)
+            Glide.with(context).load(uriCategoria).circleCrop().into(holder.binding.ivIconoCategoria)
 
-            // CLICK PARA ZOOM (Nuevo)
             holder.binding.ivIconoCategoria.setOnClickListener {
-                ImageZoomHelper.mostrarImagen(holder.itemView.context, uriCategoria)
+                ImageZoomHelper.mostrarImagen(context, uriCategoria)
             }
         } else {
-            // ICONO POR DEFECTO (Sin zoom, o zoom deshabilitado)
-            val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
+            // Si no hay foto o está rota (permiso caducado) -> Icono por defecto
             holder.binding.ivIconoCategoria.setImageResource(iconoRes)
             holder.binding.ivIconoCategoria.setColorFilter(android.graphics.Color.WHITE)
-
-            // Deshabilitamos click para que funcione el click de la fila (editar)
             holder.binding.ivIconoCategoria.setOnClickListener(null)
         }
 
-        // --- 2. FOTO TICKET (Con Zoom) ---
-        if (gasto.uriFoto != null) {
+        // --- 2. FOTO TICKET ---
+        if (gasto.uriFoto != null && esUriSegura(gasto.uriFoto)) {
             holder.binding.cardThumb.visibility = View.VISIBLE
             holder.binding.ivThumb.visibility = View.VISIBLE
-            Glide.with(holder.itemView).load(gasto.uriFoto).centerCrop().into(holder.binding.ivThumb)
+            Glide.with(context).load(gasto.uriFoto).centerCrop().into(holder.binding.ivThumb)
 
-            // CLICK PARA ZOOM (Nuevo)
             holder.binding.ivThumb.setOnClickListener {
-                ImageZoomHelper.mostrarImagen(holder.itemView.context, gasto.uriFoto)
+                ImageZoomHelper.mostrarImagen(context, gasto.uriFoto)
             }
         } else {
             holder.binding.cardThumb.visibility = View.GONE
             holder.binding.ivThumb.visibility = View.GONE
         }
 
-        // Click en el resto de la tarjeta -> Editar Gasto
         holder.itemView.setOnClickListener { onItemClicked(gasto) }
     }
 
