@@ -12,6 +12,7 @@ import com.bumptech.glide.Glide
 import com.example.gestorgastos.R
 import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.DialogAgregarGastoBinding
+import com.example.gestorgastos.databinding.DialogConfiguracionBinding // Asegúrate de tener este XML
 
 class DialogManager(private val context: Context) {
 
@@ -19,14 +20,65 @@ class DialogManager(private val context: Context) {
     var onGalleryRequested: (() -> Unit)? = null
     var onImageClick: ((String) -> Unit)? = null
 
+    // --- NUEVO: CONFIGURACIÓN ---
+    fun mostrarConfiguracion(
+        actualAmarillo: Double,
+        actualRojo: Double,
+        onGuardar: (Double, Double) -> Unit,
+        onCambiarMoneda: () -> Unit
+    ) {
+        val binding = DialogConfiguracionBinding.inflate(LayoutInflater.from(context))
+        binding.etAmarillo.setText(actualAmarillo.toString().replace(".", ","))
+        binding.etRojo.setText(actualRojo.toString().replace(".", ","))
+
+        binding.etAmarillo.addTextChangedListener(EuroTextWatcher(binding.etAmarillo))
+        binding.etRojo.addTextChangedListener(EuroTextWatcher(binding.etRojo))
+
+        AlertDialog.Builder(context)
+            .setTitle("Configurar Límites")
+            .setView(binding.root)
+            .setPositiveButton("Guardar") { _, _ ->
+                val am = binding.etAmarillo.text.toString().replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
+                val ro = binding.etRojo.text.toString().replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
+                if (am < ro) onGuardar(am, ro) else Toast.makeText(context, "El límite amarillo debe ser menor al rojo", Toast.LENGTH_LONG).show()
+            }
+            .setNeutralButton("Divisa") { _, _ -> onCambiarMoneda() }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    // --- NUEVO: SELECTOR MONEDA ---
+    fun mostrarSelectorMoneda(onMonedaCambiada: () -> Unit) {
+        val monedas = arrayOf("Euro (€)", "Dólar ($)", "Libra (£)")
+        AlertDialog.Builder(context)
+            .setTitle("Elige divisa")
+            .setItems(monedas) { _, i ->
+                val codigo = when(i) { 0 -> "EUR"; 1 -> "USD"; else -> "GBP" }
+                Formato.cambiarDivisa(codigo)
+                onMonedaCambiada()
+                Toast.makeText(context, "Moneda cambiada", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    // --- NUEVO: CONFIRMACIÓN BORRAR ---
+    fun mostrarConfirmacionBorrado(gasto: Gasto, onConfirmar: () -> Unit, onCancelar: () -> Unit) {
+        AlertDialog.Builder(context)
+            .setTitle("Borrar Gasto")
+            .setMessage("¿Estás seguro de borrar '${gasto.nombre}'?")
+            .setPositiveButton("Borrar") { _, _ -> onConfirmar() }
+            .setNegativeButton("Cancelar") { _, _ -> onCancelar() }
+            .setOnCancelListener { onCancelar() }
+            .show()
+    }
+
+    // --- TUS FUNCIONES EXISTENTES (SIN CAMBIOS) ---
     fun mostrarAgregarGasto(
         listaCategorias: List<String>,
         uriFotoActual: String?,
-        // CORRECCIÓN: Quitamos 'uri' de aquí. Usaremos la variable del Main.
         onGuardar: (nombre: String, cantidad: Double, desc: String, cat: String) -> Unit,
         onBorrarFoto: () -> Unit
-    ): AlertDialog { // Retorna AlertDialog
-
+    ): AlertDialog {
         val builder = AlertDialog.Builder(context)
         val binding = DialogAgregarGastoBinding.inflate(LayoutInflater.from(context))
 
@@ -48,14 +100,13 @@ class DialogManager(private val context: Context) {
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cant = cantidadStr.toDoubleOrNull() ?: 0.0
-                // Llamamos al callback SIN la foto (el Main ya la tiene)
                 onGuardar(nombre, cant, binding.etDescripcion.text.toString(), cat)
             } else {
                 Toast.makeText(context, "Faltan datos", Toast.LENGTH_SHORT).show()
             }
         }
         builder.setNegativeButton("Cancelar", null)
-        return builder.show() // Devuelve el diálogo
+        return builder.show()
     }
 
     fun mostrarEditarGasto(
@@ -64,8 +115,7 @@ class DialogManager(private val context: Context) {
         uriFotoActual: String?,
         onActualizar: (Gasto) -> Unit,
         onBorrarFoto: () -> Unit
-    ): AlertDialog { // CORRECCIÓN: Añadido tipo de retorno explícito
-
+    ): AlertDialog {
         val builder = AlertDialog.Builder(context)
         val binding = DialogAgregarGastoBinding.inflate(LayoutInflater.from(context))
         binding.tvTituloDialogo.text = "Editar Gasto"
@@ -95,20 +145,17 @@ class DialogManager(private val context: Context) {
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cant = cantidadStr.toDoubleOrNull() ?: 0.0
-                // Creamos copia solo con datos de texto, la foto la pone el Main
                 val gastoEditado = gasto.copy(
                     nombre = nombre,
                     cantidad = cant,
                     descripcion = binding.etDescripcion.text.toString(),
                     categoria = nuevaCat
-                    // No tocamos la URI aquí
                 )
                 onActualizar(gastoEditado)
             }
         }
         builder.setNegativeButton("Cancelar", null)
-
-        return builder.show() // CORRECCIÓN: Añadido return para que findViewById funcione
+        return builder.show()
     }
 
     private fun configurarPreviewFoto(binding: DialogAgregarGastoBinding, uri: String?, onBorrar: () -> Unit) {

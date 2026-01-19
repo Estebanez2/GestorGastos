@@ -48,9 +48,10 @@ interface GastoDao {
 
     // CONSULTA DE BUSCADOR AVANZADO
     // Si un parámetro es null, esa parte del filtro se ignora.
-    @androidx.room.Query("""
+    @Query("""
         SELECT * FROM tabla_gastos 
-        WHERE (:nombre IS NULL OR LOWER(nombre) LIKE '%' || LOWER(:nombre) || '%' OR LOWER(descripcion) LIKE '%' || LOWER(:nombre) || '%')
+        WHERE (:nombre IS NULL OR LOWER(nombre) LIKE '%' || LOWER(:nombre) || '%')
+        AND (:descripcion IS NULL OR LOWER(descripcion) LIKE '%' || LOWER(:descripcion) || '%')
         AND (:categoria IS NULL OR categoria = :categoria)
         AND (:precioMin IS NULL OR cantidad >= :precioMin)
         AND (:precioMax IS NULL OR cantidad <= :precioMax)
@@ -60,6 +61,7 @@ interface GastoDao {
     """)
     fun buscarGastosAvanzado(
         nombre: String?,
+        descripcion: String?,
         categoria: String?,
         precioMin: Double?,
         precioMax: Double?,

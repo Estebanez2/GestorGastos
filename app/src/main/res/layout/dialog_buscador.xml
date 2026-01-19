@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content">
+    android:layout_height="match_parent">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -10,21 +10,35 @@
         android:padding="24dp">
 
         <TextView
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Buscador Avanzado"
+            android:text="Búsqueda Avanzada"
             android:textSize="20sp"
             android:textStyle="bold"
-            android:textColor="@android:color/black"
-            android:gravity="center"
-            android:layout_marginBottom="16dp"/>
+            android:layout_marginBottom="16dp"
+            android:textColor="@color/black"/>
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Nombre o descripción">
+            android:hint="Nombre contiene..."
+            android:layout_marginBottom="8dp">
+
             <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/etBuscarNombre"
+                android:id="@+id/etBusquedaNombre"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"/>
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Descripción contiene..."
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etBusquedaDesc"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"/>
@@ -34,104 +48,96 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Categoría"
-            android:textStyle="bold"
-            android:layout_marginTop="16dp"/>
+            android:layout_marginTop="8dp"/>
+
         <Spinner
-            android:id="@+id/spinnerCatBusqueda"
+            android:id="@+id/spinnerBusquedaCat"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginBottom="16dp"/>
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
-            android:layout_marginTop="4dp"/>
+            android:orientation="horizontal"
+            android:baselineAligned="false"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Min €"
+                android:layout_marginEnd="4dp">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etBusquedaMin"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"/>
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Max €"
+                android:layout_marginStart="4dp">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etBusquedaMax"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"/>
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Precio (€)"
-            android:textStyle="bold"
-            android:layout_marginTop="16dp"/>
+            android:text="Rango de Fechas (Opcional)"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp"/>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <EditText
-                android:id="@+id/etPrecioMin"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/tvBusquedaFechaInicio"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:hint="Mín"
-                android:inputType="numberDecimal"/>
+                android:layout_weight="1"
+                android:padding="12dp"
+                android:background="@android:drawable/editbox_background"
+                android:text="Desde..."
+                android:gravity="center"/>
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text=" - "
-                android:padding="8dp"/>
-            <EditText
-                android:id="@+id/etPrecioMax"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:hint="Máx"
-                android:inputType="numberDecimal"/>
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Fechas"
-            android:textStyle="bold"
-            android:layout_marginTop="16dp"/>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginTop="8dp">
-
-            <Button
-                android:id="@+id/btnFechaInicio"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Desde"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"/>
+                android:layout_gravity="center"/>
 
             <TextView
-                android:id="@+id/tvFechaInicio"
+                android:id="@+id/tvBusquedaFechaFin"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="Cualquiera"
+                android:layout_weight="1"
+                android:padding="12dp"
+                android:background="@android:drawable/editbox_background"
+                android:text="Hasta..."
                 android:gravity="center"/>
         </LinearLayout>
 
-        <LinearLayout
+        <CheckBox
+            android:id="@+id/cbBuscarEnTodo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:text="Buscar en todos los meses (ignorar fecha)"
+            android:checked="false"/>
 
-            <Button
-                android:id="@+id/btnFechaFin"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Hasta"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"/>
-
-            <TextView
-                android:id="@+id/tvFechaFin"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:text="Cualquiera"
-                android:gravity="center"/>
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/btnRealizarBusqueda"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="BUSCAR"
-            android:layout_marginTop="32dp"
-            android:padding="12dp"/>
     </LinearLayout>
 </ScrollView>

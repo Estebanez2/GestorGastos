@@ -9,82 +9,105 @@ import com.example.gestorgastos.data.FiltroBusqueda
 import com.example.gestorgastos.databinding.DialogBuscadorBinding
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 class BuscadorManager(private val context: Context) {
 
-    private var fechaInicioSel: Long? = null
-    private var fechaFinSel: Long? = null
-
     fun mostrarBuscador(
         listaCategorias: List<String>,
+        filtroActual: FiltroBusqueda?, // Recibimos filtro para editar
         onBuscar: (FiltroBusqueda) -> Unit
     ) {
         val builder = AlertDialog.Builder(context)
+        // Inflamos el XML nuevo
         val binding = DialogBuscadorBinding.inflate(LayoutInflater.from(context))
 
-        // 1. Configurar Spinner Categorías (Añadimos opción "Todas")
+        // 1. Configurar Spinner
         val categoriasConTodas = mutableListOf("Todas")
         categoriasConTodas.addAll(listaCategorias)
-
         val adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, categoriasConTodas)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerCatBusqueda.adapter = adapter
+        binding.spinnerBusquedaCat.adapter = adapter
 
-        // 2. Configurar Botones de Fecha
-        binding.btnFechaInicio.setOnClickListener {
+        // Variables temporales
+        var fechaInicioSel: Long? = filtroActual?.fechaInicio
+        var fechaFinSel: Long? = filtroActual?.fechaFin
+
+        // 2. RELLENAR DATOS (Si es Modificar)
+        if (filtroActual != null) {
+            binding.etBusquedaNombre.setText(filtroActual.nombre)
+            binding.etBusquedaDesc.setText(filtroActual.descripcion) // Campo nuevo
+            binding.etBusquedaMin.setText(filtroActual.precioMin?.toString()?.replace(".", ",") ?: "")
+            binding.etBusquedaMax.setText(filtroActual.precioMax?.toString()?.replace(".", ",") ?: "")
+            binding.cbBuscarEnTodo.isChecked = filtroActual.buscarEnTodo // Checkbox nuevo
+
+            // Categoría
+            if (filtroActual.categoria != null) {
+                val index = categoriasConTodas.indexOf(filtroActual.categoria)
+                if (index >= 0) binding.spinnerBusquedaCat.setSelection(index)
+            }
+
+            // Fechas visuales
+            if (fechaInicioSel != null) binding.tvBusquedaFechaInicio.text = formatearFecha(fechaInicioSel!!)
+            if (fechaFinSel != null) binding.tvBusquedaFechaFin.text = formatearFecha(fechaFinSel!!)
+        }
+
+        // 3. Listeners de Fecha (IDs del nuevo XML)
+        binding.tvBusquedaFechaInicio.setOnClickListener {
             pickDate { time ->
                 fechaInicioSel = time
-                binding.tvFechaInicio.text = formatearFecha(time)
+                binding.tvBusquedaFechaInicio.text = formatearFecha(time)
             }
         }
-        binding.btnFechaFin.setOnClickListener {
+        binding.tvBusquedaFechaFin.setOnClickListener {
             pickDate { time ->
-                // Ajustamos al final del día (23:59:59) para que incluya todo ese día
+                // Final del día
                 val c = Calendar.getInstance()
                 c.timeInMillis = time
                 c.set(Calendar.HOUR_OF_DAY, 23)
                 c.set(Calendar.MINUTE, 59)
                 c.set(Calendar.SECOND, 59)
                 fechaFinSel = c.timeInMillis
-                binding.tvFechaFin.text = formatearFecha(time)
+                binding.tvBusquedaFechaFin.text = formatearFecha(time)
             }
         }
 
         builder.setView(binding.root)
         val dialog = builder.create()
 
-        // 3. Acción al pulsar BUSCAR
-        binding.btnRealizarBusqueda.setOnClickListener {
-            // Recogemos datos
-            val nombre = binding.etBuscarNombre.text.toString().ifEmpty { null }
+        // 4. Botón Buscar (Generalmente es el positivo del builder, o un botón en el XML)
+        // Si usas botón del AlertDialog:
+        builder.setPositiveButton("Buscar") { _, _ ->
+            val nombre = binding.etBusquedaNombre.text.toString().ifEmpty { null }
+            val desc = binding.etBusquedaDesc.text.toString().ifEmpty { null }
 
-            val catSeleccionada = binding.spinnerCatBusqueda.selectedItem.toString()
-            val categoria = if (catSeleccionada == "Todas") null else catSeleccionada
+            val catTexto = binding.spinnerBusquedaCat.selectedItem.toString()
+            val categoria = if (catTexto == "Todas") null else catTexto
 
-            val minStr = binding.etPrecioMin.text.toString().replace(",", ".")
-            val maxStr = binding.etPrecioMax.text.toString().replace(",", ".")
-            val min = if (minStr.isNotEmpty()) minStr.toDoubleOrNull() else null
-            val max = if (maxStr.isNotEmpty()) maxStr.toDoubleOrNull() else null
+            val minStr = binding.etBusquedaMin.text.toString().replace(",", ".")
+            val maxStr = binding.etBusquedaMax.text.toString().replace(",", ".")
+            val min = minStr.toDoubleOrNull()
+            val max = maxStr.toDoubleOrNull()
 
-            // Empaquetamos todo en el objeto Filtro
+            val buscarEnTodo = binding.cbBuscarEnTodo.isChecked
+
             val filtro = FiltroBusqueda(
                 nombre = nombre,
+                descripcion = desc,
                 categoria = categoria,
                 precioMin = min,
                 precioMax = max,
                 fechaInicio = fechaInicioSel,
-                fechaFin = fechaFinSel
+                fechaFin = fechaFinSel,
+                buscarEnTodo = buscarEnTodo
             )
-
-            onBuscar(filtro) // Se lo pasamos al Main
-            dialog.dismiss()
+            onBuscar(filtro)
         }
-
-        dialog.show()
+        builder.setNegativeButton("Cancelar", null)
+        builder.show()
     }
 
-    // Helper para abrir el calendario
     private fun pickDate(onDateSelected: (Long) -> Unit) {
         val c = Calendar.getInstance()
         DatePickerDialog(context, { _, y, m, d ->
@@ -95,6 +118,6 @@ class BuscadorManager(private val context: Context) {
     }
 
     private fun formatearFecha(millis: Long): String {
-        return SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(millis)
+        return SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(millis))
     }
 }

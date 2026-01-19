@@ -5,8 +5,8 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelProvider
@@ -16,8 +16,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.bumptech.glide.Glide
 import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.ActivityMainBinding
-import com.example.gestorgastos.databinding.DialogConfiguracionBinding
-import com.example.gestorgastos.ui.* import com.github.mikephil.charting.animation.Easing
+import com.example.gestorgastos.ui.* // Importamos todos los helpers
+import com.github.mikephil.charting.animation.Easing
 import com.google.android.material.snackbar.Snackbar
 import java.io.File
 import java.util.Locale
@@ -27,31 +27,32 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var viewModel: GastoViewModel
 
+    // Helpers y Managers
     private lateinit var chartManager: ChartManager
     private lateinit var dialogManager: DialogManager
     private lateinit var exportManager: ExportManager
+    private lateinit var buscadorManager: BuscadorManager
 
     private lateinit var adapterLista: GastoAdapter
     private lateinit var adapterGastosCategoria: GastoAdapter
-    private lateinit var buscadorManager: BuscadorManager
     private var adapterCalendario: CalendarioAdapter? = null
 
     enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
     private var vistaActual = Vista.LISTA
     private var categoriaSeleccionada: String? = null
 
+    // Variables para Fotos
     private var uriFotoTemporal: android.net.Uri? = null
     private var uriFotoFinal: String? = null
     private var ivPreviewActual: ImageView? = null
 
-    // --- LANZADORES ---
+    // --- LANZADORES DE CÁMARA/GALERÍA ---
     private val requestCameraLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (isGranted) abrirCamara() else Toast.makeText(this, "Permiso necesario", Toast.LENGTH_SHORT).show()
+        if (isGranted) abrirCamara() else Toast.makeText(this, "Sin permiso de cámara", Toast.LENGTH_SHORT).show()
     }
 
     private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && uriFotoTemporal != null) {
-            // Convertimos la foto temporal de la cámara a una permanente nuestra
             uriFotoFinal = copiarImagenAInternalStorage(uriFotoTemporal!!)
             actualizarVistaFotoDialogo()
         }
@@ -59,7 +60,6 @@ class MainActivity : AppCompatActivity() {
 
     private val pickGalleryLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
-            // IMPORTANTE: Copiamos la imagen para tener persistencia real
             uriFotoFinal = copiarImagenAInternalStorage(uri)
             actualizarVistaFotoDialogo()
         }
@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
         chartManager = ChartManager(this, binding.chartGastos, binding.chartCategorias) { categoria ->
             categoriaSeleccionada = categoria
             filtrarListaCategorias()
-            binding.tvTituloCategoriaSeleccionada.text = if (categoria != null) "Detalles: $categoria" else "Toca una categoría para ver detalles"
+            binding.tvTituloCategoriaSeleccionada.text = categoria?.let { "Detalles: $it" } ?: "Toca una categoría para ver detalles"
         }
 
         dialogManager = DialogManager(this).apply {
@@ -90,11 +90,13 @@ class MainActivity : AppCompatActivity() {
             onGalleryRequested = { pickGalleryLauncher.launch("image/*") }
             onImageClick = { uri -> ImageZoomHelper.mostrarImagen(this@MainActivity, uri) }
         }
+
         buscadorManager = BuscadorManager(this)
         exportManager = ExportManager(this, lifecycleScope)
     }
 
     private fun setupVistas() {
+        // Adaptador Lista Principal
         adapterLista = GastoAdapter { mostrarDialogoEditarGasto(it) }
         binding.rvGastos.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -102,6 +104,7 @@ class MainActivity : AppCompatActivity() {
             setupSwipeToDelete { pos -> mostrarDialogoConfirmacionBorrado(adapterLista.currentList[pos], adapterLista, pos) }
         }
 
+        // Adaptador Categorías
         adapterGastosCategoria = GastoAdapter { mostrarDialogoEditarGasto(it) }
         binding.rvGastosCategoria.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -116,7 +119,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupBotones() {
         binding.fabAgregar.setOnClickListener { mostrarDialogoAgregarGasto() }
-        binding.btnConfig.setOnClickListener { mostrarDialogoConfiguracion() }
+
+        // Ahora usamos DialogManager para la config
+        binding.btnConfig.setOnClickListener {
+            dialogManager.mostrarConfiguracion(
+                viewModel.limiteAmarillo,
+                viewModel.limiteRojo,
+                onGuardar = { am, ro -> viewModel.guardarNuevosLimites(am, ro) },
+                onCambiarMoneda = { dialogManager.mostrarSelectorMoneda { viewModel.notificarCambioLimites.value = true } }
+            )
+        }
 
         binding.btnExportar.setOnClickListener {
             val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
@@ -125,10 +137,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
         binding.btnMesSiguiente.setOnClickListener { viewModel.mesSiguiente() }
-        binding.btnCategorias.setOnClickListener { startActivity(android.content.Intent(this, com.example.gestorgastos.ui.CategoriasActivity::class.java)) }
+        binding.btnCategorias.setOnClickListener { startActivity(android.content.Intent(this, CategoriasActivity::class.java)) }
 
+        // Menú vistas
         binding.btnCambiarVista.setOnClickListener { view ->
-            val popup = androidx.appcompat.widget.PopupMenu(this, view)
+            val popup = PopupMenu(this, view)
             popup.menuInflater.inflate(R.menu.menu_vistas, popup.menu)
             popup.setOnMenuItemClickListener { item ->
                 when(item.itemId) {
@@ -141,72 +154,53 @@ class MainActivity : AppCompatActivity() {
             }
             popup.show()
         }
-        binding.btnBuscar.setOnClickListener {
-            if (viewModel.estaBuscando()) {
-                // Si ya hay búsqueda, el botón sirve para LIMPIAR
-                viewModel.limpiarFiltro()
-                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search) // Volver a icono lupa
-                Toast.makeText(this, "Filtro eliminado", Toast.LENGTH_SHORT).show()
-            } else {
-                // Si no, ABRIMOS EL BUSCADOR
-                val categorias = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
 
-                buscadorManager.mostrarBuscador(categorias) { filtro ->
-                    viewModel.aplicarFiltro(filtro)
-                    binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_close_clear_cancel) // Cambiar a icono X
-                }
+        // BOTÓN BUSCAR AVANZADO
+        binding.btnBuscar.setOnClickListener { view ->
+            if (viewModel.estaBuscando()) {
+                mostrarMenuFiltro(view) // Función nueva abajo
+            } else {
+                abrirBuscador(null)
             }
         }
     }
 
     private fun setupObservers() {
-
-        // 1. EL OBSERVER PRINCIPAL (Hace todo el trabajo sucio)
+        // 1. OBSERVER PRINCIPAL (Sincronizado)
         viewModel.gastosVisibles.observe(this) { lista ->
-
-            // A. Actualizamos la lista visual
             adapterLista.submitList(lista)
 
-            // B. CALCULO DEL TOTAL (AQUÍ ESTÁ LA CLAVE DEL ARREGLO)
-            // Calculamos el total directamente de la lista que acaba de llegar (la nueva).
-            // No usamos 'adapter.currentList' ni otro observer separado.
+            // Calculamos total sobre la lista nueva (SIN usar adapter.currentList)
             val totalCalculado = lista.sumOf { it.cantidad }
             actualizarTotalUI(totalCalculado)
 
-            // C. Filtros de Categorías y Gráficas
             filtrarListaCategorias()
 
-            // Calendario
             val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
             adapterCalendario = CalendarioAdapter(mes, lista)
             binding.rvCalendario.adapter = adapterCalendario
 
-            // Gráficos (ChartManager)
             chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
             chartManager.actualizarPieChart(lista, categoriaSeleccionada)
 
-            // D. Lógica visual (Título, Iconos, Vista vacía)
+            // Lógica UI (Títulos e iconos)
             if (viewModel.estaBuscando()) {
-                binding.tvMesTitulo.text = "Resultados Búsqueda (${lista.size})"
-                binding.tvVacio.text = "No se encontraron gastos con ese filtro"
-                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                binding.tvMesTitulo.text = "Filtro activo (${lista.size})"
+                binding.tvVacio.text = "Sin resultados"
+                // Icono engranaje/filtro para indicar que se puede modificar
+                binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_manage)
                 binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
             } else {
-                // Modo Normal: Título del Mes
                 val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
                 val textoMes = viewModel.mesActual.value?.format(formatter)?.replaceFirstChar { it.uppercase() }
                 binding.tvMesTitulo.text = textoMes
-
                 binding.tvVacio.text = "No hay gastos este mes"
                 binding.btnBuscar.setImageResource(android.R.drawable.ic_menu_search)
-
-                // Solo mostramos 'Vacio' si la lista es vacía Y estamos en vista de lista
                 binding.tvVacio.visibility = if (lista.isEmpty() && vistaActual == Vista.LISTA) View.VISIBLE else View.GONE
             }
         }
 
-        // 2. SOLO OBSERVAMOS MES ACTUAL PARA ACTUALIZAR TÍTULO SI CAMBIA RÁPIDO
-        // (Opcional, pero ayuda a que el título cambie instantáneamente al pulsar la flecha)
+        // 2. TÍTULO MES (Solo visual)
         viewModel.mesActual.observe(this) { mes ->
             if (!viewModel.estaBuscando()) {
                 val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
@@ -214,20 +208,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 3. CAMBIO DE LÍMITES (Configuración)
+        // 3. CAMBIO DE LIMITES
         viewModel.notificarCambioLimites.observe(this) {
-            // Aquí SÍ podemos usar gastosVisibles.value porque la lista no ha cambiado, solo los colores
-            val listaActual = viewModel.gastosVisibles.value ?: emptyList()
-            val total = listaActual.sumOf { it.cantidad }
-
-            actualizarTotalUI(total) // Recalcula el color del semáforo
-
-            // Refrescamos gráficas y listas para que pinten los nuevos colores
-            chartManager.actualizarBarChart(listaActual, viewModel.limiteRojo, viewModel.limiteAmarillo)
+            val lista = viewModel.gastosVisibles.value ?: emptyList()
+            actualizarTotalUI(lista.sumOf { it.cantidad })
+            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
             adapterLista.notifyDataSetChanged()
         }
 
-        // 4. CATEGORÍAS (Fotos e iconos)
+        // 4. CATEGORÍAS
         viewModel.listaCategorias.observe(this) { lista ->
             if (lista.isEmpty()) viewModel.inicializarCategoriasPorDefecto()
             val mapa = lista.associate { it.nombre to it.uriFoto }
@@ -236,6 +225,8 @@ class MainActivity : AppCompatActivity() {
             adapterLista.notifyDataSetChanged()
         }
     }
+
+    // --- FUNCIONES LÓGICA UI ---
 
     private fun cambiarVista(nuevaVista: Vista) {
         vistaActual = nuevaVista
@@ -248,9 +239,7 @@ class MainActivity : AppCompatActivity() {
         when (vistaActual) {
             Vista.LISTA -> {
                 binding.rvGastos.visibility = View.VISIBLE
-                if (viewModel.gastosVisibles.value.isNullOrEmpty()) {
-                    binding.tvVacio.visibility = View.VISIBLE
-                }
+                if (viewModel.gastosVisibles.value.isNullOrEmpty()) binding.tvVacio.visibility = View.VISIBLE
             }
             Vista.CALENDARIO -> binding.rvCalendario.visibility = View.VISIBLE
             Vista.GRAFICA -> {
@@ -260,11 +249,42 @@ class MainActivity : AppCompatActivity() {
             Vista.QUESITOS -> {
                 binding.layoutVistaCategorias.visibility = View.VISIBLE
                 binding.chartCategorias.animateY(1200, Easing.EaseOutBounce)
-                adapterGastosCategoria.submitList(emptyList())
+                adapterGastosCategoria.submitList(emptyList()) // Limpiamos selección
                 binding.tvTituloCategoriaSeleccionada.text = "Toca una categoría para ver detalles"
                 binding.chartCategorias.highlightValues(null)
             }
         }
+    }
+
+    // --- LÓGICA BUSCADOR NUEVA ---
+    private fun abrirBuscador(filtroPreexistente: com.example.gestorgastos.data.FiltroBusqueda?) {
+        val categorias = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
+        buscadorManager.mostrarBuscador(categorias, filtroPreexistente) { filtro ->
+            viewModel.aplicarFiltro(filtro)
+        }
+    }
+
+    private fun mostrarMenuFiltro(view: View) {
+        val popup = PopupMenu(this, view)
+        popup.menu.add(0, 1, 0, "Modificar filtro")
+        popup.menu.add(0, 2, 1, "Quitar filtro")
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> { // Modificar
+                    val actual = viewModel.filtroActualValue // Obtenemos del ViewModel
+                    abrirBuscador(actual)
+                    true
+                }
+                2 -> { // Quitar
+                    viewModel.limpiarFiltro()
+                    Toast.makeText(this, "Filtro eliminado", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
     }
 
     private fun filtrarListaCategorias() {
@@ -280,28 +300,25 @@ class MainActivity : AppCompatActivity() {
         binding.tvTotalMes.text = Formato.formatearMoneda(total)
         val colorRes = viewModel.obtenerColorAlerta(total)
         binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, colorRes))
-        binding.tvTotalMes.animate().scaleX(1.1f).scaleY(1.1f).setDuration(100).withEndAction {
-            binding.tvTotalMes.animate().scaleX(1f).scaleY(1f).setDuration(100).start()
-        }.start()
     }
 
-    // --- DIALOGOS ---
+    // --- DELEGACIÓN DE DIÁLOGOS AL MANAGER ---
 
     private fun mostrarDialogoAgregarGasto() {
         val categorias = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
-        uriFotoFinal = null // Reset
+        uriFotoFinal = null
 
         val dialog = dialogManager.mostrarAgregarGasto(
-            categorias, null, // Pasamos null porque la foto la gestiona el Main
+            categorias, null,
             onGuardar = { nombre, cant, desc, cat ->
-                // Usamos 'uriFotoFinal' que es la variable local del Main
                 viewModel.agregarGasto(nombre, cant, desc, uriFotoFinal, cat)
-                val total = (viewModel.sumaTotalDelMes.value ?: 0.0) + cant
-                binding.viewFlashBorde.flashEffect(viewModel.obtenerColorAlerta(total))
+                // Efecto Flash (Opcional, si tienes Extensiones.kt)
+                val totalNuevo = (viewModel.gastosVisibles.value?.sumOf { it.cantidad } ?: 0.0) + cant
+                binding.viewFlashBorde.flashEffect(viewModel.obtenerColorAlerta(totalNuevo))
             },
             onBorrarFoto = { uriFotoFinal = null }
         )
-        // Recuperamos la vista de imagen del diálogo para actualizarla si volvemos de cámara
+        // Obtenemos la ref de la imagen para actualizarla luego
         ivPreviewActual = dialog.findViewById(R.id.ivPreviewFoto)
     }
 
@@ -311,64 +328,33 @@ class MainActivity : AppCompatActivity() {
 
         val dialog = dialogManager.mostrarEditarGasto(
             gasto, categorias, uriFotoFinal,
-            onActualizar = { gastoEditado ->
-                // Actualizamos usando uriFotoFinal local por si cambió en el proceso
-                viewModel.actualizarGasto(gastoEditado.copy(uriFoto = uriFotoFinal))
+            onActualizar = { editado ->
+                viewModel.actualizarGasto(editado.copy(uriFoto = uriFotoFinal))
                 Toast.makeText(this, "Actualizado", Toast.LENGTH_SHORT).show()
             },
             onBorrarFoto = { uriFotoFinal = null }
         )
-        // findViewById ahora funciona porque DialogManager retorna el AlertDialog
         ivPreviewActual = dialog.findViewById(R.id.ivPreviewFoto)
     }
 
-    private fun mostrarDialogoConfiguracion() {
-        val builder = AlertDialog.Builder(this)
-        val dBinding = DialogConfiguracionBinding.inflate(layoutInflater)
-        dBinding.etAmarillo.setText(viewModel.limiteAmarillo.toString().replace(".", ","))
-        dBinding.etRojo.setText(viewModel.limiteRojo.toString().replace(".", ","))
-        dBinding.etAmarillo.addTextChangedListener(EuroTextWatcher(dBinding.etAmarillo))
-        dBinding.etRojo.addTextChangedListener(EuroTextWatcher(dBinding.etRojo))
-
-        builder.setView(dBinding.root)
-            .setPositiveButton("Guardar") { _, _ ->
-                val am = dBinding.etAmarillo.text.toString().replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
-                val ro = dBinding.etRojo.text.toString().replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
-                if (am < ro) viewModel.guardarNuevosLimites(am, ro)
-            }
-            .setNeutralButton("Cambiar Moneda") { _, _ -> mostrarDialogoMoneda() }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun mostrarDialogoMoneda() {
-        val monedas = arrayOf("Euro (€)", "Dólar ($)", "Libra (£)")
-        AlertDialog.Builder(this).setTitle("Elige divisa").setItems(monedas) { _, i ->
-            when(i) { 0 -> "EUR"; 1 -> "USD"; else -> "GBP" }.let { Formato.cambiarDivisa(it) }
-            viewModel.notificarCambioLimites.value = true
-            Toast.makeText(this, "Moneda cambiada", Toast.LENGTH_SHORT).show()
-        }.show()
-    }
-
-    private fun mostrarDialogoConfirmacionBorrado(gasto: Gasto, adapter: GastoAdapter, position: Int) {
-        AlertDialog.Builder(this)
-            .setTitle("Borrar Gasto")
-            .setMessage("¿Estás seguro de borrar '${gasto.nombre}'?")
-            .setPositiveButton("Borrar") { _, _ ->
+    private fun mostrarDialogoConfirmacionBorrado(gasto: Gasto, adapter: GastoAdapter, pos: Int) {
+        dialogManager.mostrarConfirmacionBorrado(
+            gasto,
+            onConfirmar = {
                 viewModel.borrarGasto(gasto)
-                var deshacerPulsado = false
+                var deshacer = false
                 Snackbar.make(binding.root, "Borrado", Snackbar.LENGTH_LONG).setAction("Deshacer") {
-                    if (!deshacerPulsado) {
-                        deshacerPulsado = true
+                    if (!deshacer) {
+                        deshacer = true
                         viewModel.agregarGasto(gasto.nombre, gasto.cantidad, gasto.descripcion, gasto.uriFoto, gasto.categoria, gasto.fecha)
                     }
                 }.show()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> adapter.notifyItemChanged(position) }
-            .setOnCancelListener { adapter.notifyItemChanged(position) }
-            .show()
+            },
+            onCancelar = { adapter.notifyItemChanged(pos) } // Restaurar swipe
+        )
     }
 
+    // --- FOTOS (Se mantienen aquí porque necesitan los Launchers) ---
     private fun checkCameraPermissionAndOpen() {
         ejecutarConPermisoCamara(
             onGranted = { abrirCamara() },
