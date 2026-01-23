@@ -1,10 +1,13 @@
 package com.example.gestorgastos
 
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.View
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.ContextCompat
@@ -16,9 +19,10 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.bumptech.glide.Glide
 import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.ActivityMainBinding
-import com.example.gestorgastos.ui.* // Importamos todos los helpers
+import com.example.gestorgastos.ui.*
 import com.github.mikephil.charting.animation.Easing
 import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 
@@ -35,6 +39,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var adapterLista: GastoAdapter
     private lateinit var adapterGastosCategoria: GastoAdapter
+    private lateinit var dataTransferManager: DataTransferManager
+    private lateinit var conflictosManager: ConflictosManager
     private var adapterCalendario: CalendarioAdapter? = null
 
     enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
@@ -62,6 +68,12 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             uriFotoFinal = copiarImagenAInternalStorage(uri)
             actualizarVistaFotoDialogo()
+        }
+    }
+    // Launcher para seleccionar el archivo al importar (ZIP o JSON)
+    private val importFileLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            mostrarDialogoModoImportacion(uri)
         }
     }
 
@@ -93,16 +105,38 @@ class MainActivity : AppCompatActivity() {
 
         buscadorManager = BuscadorManager(this)
         exportManager = ExportManager(this, lifecycleScope)
+        dataTransferManager = DataTransferManager(this)
+        conflictosManager = ConflictosManager(this)
     }
 
     private fun setupVistas() {
         // Adaptador Lista Principal
         adapterLista = GastoAdapter { mostrarDialogoEditarGasto(it) }
+        adapterLista.onSelectionChanged = { cantidad ->
+            if (cantidad > 0) {
+                // Mostrar barra
+                binding.layoutBarraSeleccion.visibility = View.VISIBLE
+                binding.tvContadorSeleccion.text = "$cantidad seleccionados"
+
+                // Ocultar otras cosas si molestan (opcional)
+                binding.fabAgregar.hide()
+            } else {
+                // Ocultar barra
+                binding.layoutBarraSeleccion.visibility = View.GONE
+                binding.fabAgregar.show()
+            }
+        }
         binding.rvGastos.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = adapterLista
-            setupSwipeToDelete { pos -> mostrarDialogoConfirmacionBorrado(adapterLista.currentList[pos], adapterLista, pos) }
-        }
+            setupSwipeToDelete { pos ->
+                // Truco: Si la barra está visible, no dejamos borrar deslizando
+                if (binding.layoutBarraSeleccion.visibility == View.GONE) {
+                    mostrarDialogoConfirmacionBorrado(adapterLista.currentList[pos], adapterLista, pos)
+                } else {
+                    adapterLista.notifyItemChanged(pos) // Restaurar swipe
+                }
+            }        }
 
         // Adaptador Categorías
         adapterGastosCategoria = GastoAdapter { mostrarDialogoEditarGasto(it) }
@@ -129,10 +163,56 @@ class MainActivity : AppCompatActivity() {
                 onCambiarMoneda = { dialogManager.mostrarSelectorMoneda { viewModel.notificarCambioLimites.value = true } }
             )
         }
+        // Botón Cerrar (X)
+        binding.btnCerrarSeleccion.setOnClickListener {
+            adapterLista.salirModoSeleccion()
+        }
+        // Botón Borrar (Papelera)
+        binding.btnBorrarSeleccionados.setOnClickListener {
+            val seleccionados = adapterLista.obtenerGastosSeleccionados()
+            if (seleccionados.isNotEmpty()) {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Borrar Gastos")
+                    .setMessage("¿Estás seguro de borrar ${seleccionados.size} gastos?")
+                    .setPositiveButton("Borrar") { _, _ ->
 
+                        // A. Guardamos una copia temporal para poder deshacer
+                        val copiaSeguridad = seleccionados.toList()
+
+                        // B. Borramos
+                        viewModel.borrarGastosSeleccionados(seleccionados)
+
+                        // C. Salimos del modo selección
+                        adapterLista.salirModoSeleccion()
+
+                        // D. Mostramos Snackbar con botón DESHACER
+                        var deshacerPulsado = false
+                        com.google.android.material.snackbar.Snackbar.make(
+                            binding.root,
+                            "${seleccionados.size} gastos eliminados",
+                            5000 // 5 segundos de duración
+                        )
+                            .setAction("DESHACER") {
+                                if (!deshacerPulsado) {
+                                    deshacerPulsado = true
+                                    // Restauramos los datos
+                                    viewModel.restaurarGastos(copiaSeguridad)
+                                }
+                            }
+                            .show()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+        }
         binding.btnExportar.setOnClickListener {
-            val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
-            exportManager.iniciarProcesoExportacion(vistaActual, viewModel.gastosVisibles.value ?: emptyList(), vistas)
+            exportManager.mostrarMenuPrincipal { accion ->
+                when (accion) {
+                    ExportManager.Accion.IMAGEN_VISTA -> manejarExportacionImagen()
+                    ExportManager.Accion.EXPORTAR_DATOS -> manejarExportacionDatos()
+                    ExportManager.Accion.IMPORTAR_DATOS -> manejarImportacionDatos()
+                }
+            }
         }
 
         binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
@@ -404,5 +484,227 @@ class MainActivity : AppCompatActivity() {
             iv.setOnClickListener { ImageZoomHelper.mostrarImagen(this, uriFotoFinal) }
             (iv.parent as? View)?.findViewById<View>(R.id.btnBorrarFoto)?.visibility = View.VISIBLE
         }
+    }
+
+    // --- LÓGICA DE EXPORTAR IMAGEN (Antigua, adaptada) ---
+    private fun manejarExportacionImagen() {
+        val lista = viewModel.gastosVisibles.value ?: emptyList()
+        if (lista.isEmpty()) {
+            Toast.makeText(this, "No hay nada que capturar", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
+
+        exportManager.procesarCapturaImagen(vistaActual, lista, vistas) { bitmap ->
+            if (bitmap != null) {
+                // Preguntamos qué hacer con la imagen
+                AlertDialog.Builder(this)
+                    .setTitle("Imagen Generada")
+                    .setItems(arrayOf("Guardar en Galería", "Compartir")) { _, which ->
+                        if (which == 0) ExportarHelper.guardarEnDispositivo(this, bitmap, null, true)
+                        else ExportarHelper.compartir(this, bitmap, null, true)
+                    }
+                    .show()
+            }
+        }
+    }
+
+    // --- LÓGICA DE EXPORTAR DATOS (BACKUP) ---
+    private fun manejarExportacionDatos() {
+        val opciones = arrayOf(
+            "📦 Completa con Fotos (ZIP)",
+            "📄 Solo Datos (JSON)",
+            "📊 Hoja de Cálculo (CSV)"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Elige el formato")
+            .setItems(opciones) { _, which ->
+                when (which) {
+                    0 -> realizarBackup(incluirFotos = true)
+                    1 -> realizarBackup(incluirFotos = false)
+                    2 -> realizarExportacionSoloCSV()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun realizarBackup(incluirFotos: Boolean) {
+        val mensaje = if (incluirFotos) "Generando ZIP con fotos..." else "Generando JSON..."
+        val progress = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setMessage(mensaje)
+            .setCancelable(false)
+            .show()
+
+        lifecycleScope.launch {
+            val archivo = dataTransferManager.exportarDatos(incluirFotos)
+            progress.dismiss()
+            // Llamamos al helper común
+            mostrarDialogoPostExportacion(archivo, if (incluirFotos) "application/zip" else "application/json")
+        }
+    }
+
+    private fun realizarExportacionSoloCSV() {
+        val progress = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setMessage("Generando CSV...")
+            .setCancelable(false)
+            .show()
+
+        lifecycleScope.launch {
+            val archivo = dataTransferManager.exportarSoloCSV()
+            progress.dismiss()
+            // Llamamos al helper común
+            mostrarDialogoPostExportacion(archivo, "text/csv")
+        }
+    }
+
+    private fun mostrarDialogoPostExportacion(archivo: java.io.File?, mimeType: String) {
+        if (archivo != null) {
+            AlertDialog.Builder(this)
+                .setTitle("Archivo Generado")
+                .setMessage("Nombre: ${archivo.name}")
+                .setPositiveButton("Compartir / Enviar") { _, _ ->
+                    val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivo)
+                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = mimeType
+                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(android.content.Intent.createChooser(intent, "Enviar a..."))
+                }
+                .setNegativeButton("Guardar en Descargas") { _, _ ->
+                    copiarADescargas(archivo, mimeType)
+                }
+                .show()
+        } else {
+            Toast.makeText(this, "Error al generar el archivo", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Función rápida para mover el archivo de cache a Descargas
+    private fun copiarADescargas(archivo: File, mime: String) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                // --- OPCIÓN A: ANDROID 10+ (API 29+) ---
+                // Usamos MediaStore como tenías, que no requiere permisos de escritura en el Manifest
+                val contentValues = android.content.ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, archivo.name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/GestorGastos")
+                }
+
+                val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+
+                if (uri != null) {
+                    contentResolver.openOutputStream(uri)?.use { output ->
+                        archivo.inputStream().use { input -> input.copyTo(output) }
+                    }
+                    Toast.makeText(this, "Guardado en Descargas (Carpeta GestorGastos)", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                // --- OPCIÓN B: ANDROID 9 Y MENOR (API < 29) ---
+                // Usamos el sistema de archivos clásico java.io.File
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS)
+                val carpetaApp = File(downloadsDir, "GestorGastos")
+
+                if (!carpetaApp.exists()) carpetaApp.mkdirs()
+
+                val archivoDestino = File(carpetaApp, archivo.name)
+
+                // Copiamos los bytes
+                archivo.inputStream().use { input ->
+                    java.io.FileOutputStream(archivoDestino).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                // Avisamos al sistema para que el archivo aparezca si conectas el móvil al PC
+                android.media.MediaScannerConnection.scanFile(
+                    this,
+                    arrayOf(archivoDestino.absolutePath),
+                    arrayOf(mime),
+                    null
+                )
+
+                Toast.makeText(this, "Guardado en Descargas/GestorGastos", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Error al guardar: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- LÓGICA DE IMPORTAR DATOS (RESTAURAR) ---
+    private fun manejarImportacionDatos() {
+        // Lanzamos el selector de archivos (Filtrar por * o zip/json)
+        importFileLauncher.launch("*/*")
+    }
+
+    private fun mostrarDialogoModoImportacion(uri: android.net.Uri) {
+        AlertDialog.Builder(this)
+            .setTitle("Modo de Importación")
+            .setMessage("¿Cómo quieres importar estos datos?")
+            .setPositiveButton("AÑADIR (Mezclar)") { _, _ ->
+                confirmarImportacion(uri, sustituir = false)
+            }
+            .setNegativeButton("SUSTITUIR (Borrar todo)") { _, _ ->
+                // Doble confirmación para sustituir
+                AlertDialog.Builder(this)
+                    .setTitle("⚠️ ¡Cuidado!")
+                    .setMessage("Esta acción borrará TODOS tus gastos y categorías actuales antes de importar.\n\n¿Estás seguro?")
+                    .setPositiveButton("SÍ, BORRAR TODO") { _, _ ->
+                        confirmarImportacion(uri, sustituir = true)
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+            .setNeutralButton("Cancelar", null)
+            .show()
+    }
+
+    private fun confirmarImportacion(uri: android.net.Uri, sustituir: Boolean) {
+        val progress = AlertDialog.Builder(this)
+            .setMessage("Analizando archivo...")
+            .setCancelable(false)
+            .show()
+
+        lifecycleScope.launch {
+            // Importamos (esto guarda los NO conflictivos y devuelve los conflictivos)
+            val resultado = dataTransferManager.importarDatos(uri, sustituir)
+            progress.dismiss()
+
+            if (resultado.exito) {
+
+                // CASO A: Importación limpia o Sustitución total
+                if (resultado.conflictos.isEmpty()) {
+                    finalizarImportacionExito(resultado.gastosInsertados)
+                }
+                // CASO B: Hay duplicados para resolver
+                else {
+                    conflictosManager.mostrarDialogoResolucion(resultado.conflictos) { descartar, reemplazar, duplicar ->
+                        // Cuando el usuario pulsa un botón en el diálogo, volvemos aquí
+                        lifecycleScope.launch {
+                            dataTransferManager.resolverConflictos(descartar, reemplazar, duplicar)
+                            // Refrescamos UI (aunque sea parcialmente)
+                            viewModel.limpiarFiltro()
+                        }
+                    }
+                }
+            } else {
+                Toast.makeText(this@MainActivity, "Error al importar.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun finalizarImportacionExito(cantidad: Int) {
+        viewModel.limpiarFiltro()
+        viewModel.inicializarCategoriasPorDefecto()
+        binding.viewFlashBorde.flashEffect(R.color.alerta_verde)
+
+        val msg = if (cantidad > 0) "Importados $cantidad gastos nuevos." else "Importación completada."
+        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
     }
 }

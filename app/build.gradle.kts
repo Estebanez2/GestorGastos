@@ -77,4 +77,7 @@ dependencies {
 
     // LÍNEA PARA EL ZOOM:
     implementation("com.github.chrisbanes:PhotoView:2.3.0")
+
+    // Usar JSON
+    implementation("com.google.code.gson:gson:2.10.1")
 }

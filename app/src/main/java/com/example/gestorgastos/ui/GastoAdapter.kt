@@ -1,8 +1,7 @@
 package com.example.gestorgastos.ui
 
-import android.net.Uri
+import android.graphics.Color
 import android.view.LayoutInflater
-import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -15,11 +14,129 @@ import java.util.Date
 import java.util.Locale
 
 class GastoAdapter(
-    var mapaCategorias: Map<String, String?> = emptyMap(),
-    private val onItemClicked: (Gasto) -> Unit
-) : ListAdapter<Gasto, GastoAdapter.GastoViewHolder>(DiffCallback) {
+    private val onGastoClick: (Gasto) -> Unit
+) : ListAdapter<Gasto, GastoAdapter.GastoViewHolder>(DiffCallback()) {
 
-    class GastoViewHolder(val binding: ItemGastoBinding) : RecyclerView.ViewHolder(binding.root)
+    // Mapa para saber qué foto tiene cada categoría ("Comida" -> "content://...")
+    var mapaCategorias: Map<String, String?> = emptyMap()
+
+    // --- MULTISELECCIÓN ---
+    private var isSelectionMode = false
+    private val selectedIds = mutableSetOf<Long>()
+
+    var onSelectionChanged: ((Int) -> Unit)? = null
+
+    fun salirModoSeleccion() {
+        isSelectionMode = false
+        selectedIds.clear()
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(0)
+    }
+
+    fun obtenerGastosSeleccionados(): List<Gasto> {
+        return currentList.filter { selectedIds.contains(it.id) }
+    }
+
+    inner class GastoViewHolder(private val binding: ItemGastoBinding) : RecyclerView.ViewHolder(binding.root) {
+        fun bind(gasto: Gasto) {
+            val context = binding.root.context
+
+            // 1. DATOS DE TEXTO
+            binding.tvNombre.text = gasto.nombre
+            binding.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
+            val sdf = SimpleDateFormat("dd MMM", Locale.getDefault())
+            binding.tvFecha.text = sdf.format(Date(gasto.fecha))
+
+            // 2. LÓGICA DE FOTO DE CATEGORÍA
+            // Buscamos si esta categoría tiene foto personalizada en el mapa
+            val uriFotoCategoria = mapaCategorias[gasto.categoria]
+
+            if (uriFotoCategoria != null) {
+                // A. Si tiene foto personalizada -> Usamos Glide
+                Glide.with(context)
+                    .load(uriFotoCategoria)
+                    .circleCrop() // La recortamos en círculo para que quede bonito
+                    .into(binding.ivIconoCategoria)
+
+                // Clic para ver en grande (solo si no estamos seleccionando)
+                binding.ivIconoCategoria.setOnClickListener {
+                    if (!isSelectionMode) ImageZoomHelper.mostrarImagen(context, uriFotoCategoria)
+                    else toggleSelection(gasto.id) // Si estamos seleccionando, el clic selecciona
+                }
+            } else {
+                // B. Si no tiene foto -> Usamos Icono por defecto (CategoriasHelper)
+                val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
+                binding.ivIconoCategoria.setImageResource(iconoRes)
+                binding.ivIconoCategoria.clearColorFilter()
+
+                // Quitamos el clic de zoom para los iconos por defecto
+                binding.ivIconoCategoria.setOnClickListener {
+                    if (isSelectionMode) toggleSelection(gasto.id)
+                }
+            }
+
+            // 3. LÓGICA DE FOTO DEL GASTO (Miniatura)
+            if (gasto.uriFoto != null) {
+                binding.cardThumb.visibility = android.view.View.VISIBLE
+                binding.ivThumb.visibility = android.view.View.VISIBLE
+
+                Glide.with(context)
+                    .load(gasto.uriFoto)
+                    .centerCrop()
+                    .into(binding.ivThumb)
+
+                // Clic para ver en grande
+                binding.ivThumb.setOnClickListener {
+                    if (!isSelectionMode) ImageZoomHelper.mostrarImagen(context, gasto.uriFoto)
+                    else toggleSelection(gasto.id)
+                }
+            } else {
+                binding.cardThumb.visibility = android.view.View.GONE
+            }
+
+            // 4. COLORES DE SELECCIÓN
+            if (selectedIds.contains(gasto.id)) {
+                binding.cardGasto.setCardBackgroundColor(Color.parseColor("#E0E0E0")) // Gris si seleccionado
+            } else {
+                binding.cardGasto.setCardBackgroundColor(Color.WHITE) // Blanco normal
+            }
+
+            // 5. CLIC EN LA TARJETA (Editar o Seleccionar)
+            binding.root.setOnClickListener {
+                if (isSelectionMode) {
+                    toggleSelection(gasto.id)
+                } else {
+                    onGastoClick(gasto)
+                }
+            }
+
+            // 6. LONG CLICK (Iniciar selección)
+            binding.root.setOnLongClickListener {
+                if (!isSelectionMode) {
+                    isSelectionMode = true
+                    toggleSelection(gasto.id)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+        private fun toggleSelection(id: Long) {
+            if (selectedIds.contains(id)) {
+                selectedIds.remove(id)
+            } else {
+                selectedIds.add(id)
+            }
+
+            if (selectedIds.isEmpty()) {
+                isSelectionMode = false
+            }
+
+            notifyItemChanged(adapterPosition)
+            onSelectionChanged?.invoke(selectedIds.size)
+        }
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GastoViewHolder {
         val binding = ItemGastoBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -27,62 +144,11 @@ class GastoAdapter(
     }
 
     override fun onBindViewHolder(holder: GastoViewHolder, position: Int) {
-        val gasto = getItem(position)
-        val context = holder.itemView.context
-
-        holder.binding.tvNombre.text = gasto.nombre
-        holder.binding.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
-        val dateFormat = SimpleDateFormat("dd MMM", Locale("es", "ES"))
-        holder.binding.tvFecha.text = dateFormat.format(Date(gasto.fecha))
-
-        // --- FUNCIÓN DE SEGURIDAD INTERNA ---
-        fun esUriSegura(uri: String): Boolean {
-            return try {
-                context.contentResolver.openInputStream(Uri.parse(uri))?.close()
-                true
-            } catch (e: Exception) { false }
-        }
-
-        // --- 1. ICONO CATEGORÍA ---
-        val uriCategoria = mapaCategorias[gasto.categoria]
-        val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
-
-        // Solo cargamos con Glide si existe la URI y es SEGURA
-        if (uriCategoria != null && esUriSegura(uriCategoria)) {
-            holder.binding.ivIconoCategoria.clearColorFilter()
-            Glide.with(context).load(uriCategoria).circleCrop().into(holder.binding.ivIconoCategoria)
-
-            holder.binding.ivIconoCategoria.setOnClickListener {
-                ImageZoomHelper.mostrarImagen(context, uriCategoria)
-            }
-        } else {
-            // Si no hay foto o está rota (permiso caducado) -> Icono por defecto
-            holder.binding.ivIconoCategoria.setImageResource(iconoRes)
-            holder.binding.ivIconoCategoria.setColorFilter(android.graphics.Color.WHITE)
-            holder.binding.ivIconoCategoria.setOnClickListener(null)
-        }
-
-        // --- 2. FOTO TICKET ---
-        if (gasto.uriFoto != null && esUriSegura(gasto.uriFoto)) {
-            holder.binding.cardThumb.visibility = View.VISIBLE
-            holder.binding.ivThumb.visibility = View.VISIBLE
-            Glide.with(context).load(gasto.uriFoto).centerCrop().into(holder.binding.ivThumb)
-
-            holder.binding.ivThumb.setOnClickListener {
-                ImageZoomHelper.mostrarImagen(context, gasto.uriFoto)
-            }
-        } else {
-            holder.binding.cardThumb.visibility = View.GONE
-            holder.binding.ivThumb.visibility = View.GONE
-        }
-
-        holder.itemView.setOnClickListener { onItemClicked(gasto) }
+        holder.bind(getItem(position))
     }
 
-    companion object {
-        private val DiffCallback = object : DiffUtil.ItemCallback<Gasto>() {
-            override fun areItemsTheSame(oldItem: Gasto, newItem: Gasto) = oldItem.id == newItem.id
-            override fun areContentsTheSame(oldItem: Gasto, newItem: Gasto) = oldItem == newItem
-        }
+    class DiffCallback : DiffUtil.ItemCallback<Gasto>() {
+        override fun areItemsTheSame(oldItem: Gasto, newItem: Gasto) = oldItem.id == newItem.id
+        override fun areContentsTheSame(oldItem: Gasto, newItem: Gasto) = oldItem == newItem
     }
 }

@@ -39,6 +39,9 @@ interface GastoDao {
     @Delete
     suspend fun borrarCategoria(categoria: Categoria)
 
+    @Delete
+    suspend fun borrarListaGastos(gastos: List<Gasto>)
+
     @Query("SELECT * FROM tabla_categorias ORDER BY nombre ASC")
     fun obtenerCategorias(): kotlinx.coroutines.flow.Flow<List<Categoria>>
 
@@ -69,4 +72,38 @@ interface GastoDao {
         fechaFin: Long?
     ): Flow<List<Gasto>>
     // Usamos Flow para que si cambias un gasto buscado, se actualice en tiempo real
+
+
+    // --- MÉTODOS PARA IMPORTACIÓN/EXPORTACIÓN ---
+
+    // 1. Para exportar todo de golpe
+    @Query("SELECT * FROM tabla_gastos")
+    suspend fun obtenerTodosLosGastosDirecto(): List<Gasto> // Sin Flow, lista directa
+
+    @Query("SELECT * FROM tabla_categorias")
+    suspend fun obtenerTodasLasCategoriasDirecto(): List<Categoria> // Sin Flow
+
+    // 2. Para el modo "Sustituir" (Borrar todo antes de importar)
+    @Query("DELETE FROM tabla_gastos")
+    suspend fun borrarTodosLosGastos()
+
+    @Query("DELETE FROM tabla_categorias")
+    suspend fun borrarTodasLasCategorias()
+
+    // 3. Para insertar listas masivas (OnConflictStrategy.REPLACE o IGNORE según prefieras)
+    // Usamos REPLACE para categorías por si ya existen actualizar su foto
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertarListaCategorias(categorias: List<Categoria>)
+
+    // Para gastos, al importar, el código se encargará de poner ID=0 para que se creen nuevos
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertarListaGastos(gastos: List<Gasto>)
+
+    // Obtener categoria por nombre
+    @Query("SELECT * FROM tabla_categorias WHERE nombre = :nombre LIMIT 1")
+    suspend fun obtenerCategoriaPorNombre(nombre: String): Categoria?
+
+    // Busca si existe un gasto IDÉNTICO (mismo nombre, cantidad y fecha exacta)
+    @Query("SELECT * FROM tabla_gastos WHERE nombre = :nombre AND cantidad = :cantidad AND fecha = :fecha LIMIT 1")
+    suspend fun buscarDuplicado(nombre: String, cantidad: Double, fecha: Long): Gasto?
 }

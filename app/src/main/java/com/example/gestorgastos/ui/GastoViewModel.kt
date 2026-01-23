@@ -157,7 +157,21 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun borrarCategoria(categoria: Categoria) { viewModelScope.launch(Dispatchers.IO) { dao.borrarCategoria(categoria) } }
+
     fun obtenerGastosPorCategoria(lista: List<Gasto>): Map<String, Double> {
         return lista.groupBy { it.categoria }.mapValues { entry -> entry.value.sumOf { it.cantidad } }
+    }
+
+    fun borrarGastosSeleccionados(lista: List<Gasto>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.borrarListaGastos(lista)
+        }
+    }
+
+    // Función para deshacer el borrado (vuelve a insertar la lista)
+    fun restaurarGastos(lista: List<Gasto>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.insertarListaGastos(lista)
+        }
     }
 }

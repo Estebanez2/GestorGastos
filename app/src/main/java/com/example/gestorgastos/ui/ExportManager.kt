@@ -20,90 +20,67 @@ class ExportManager(
     private val scope: LifecycleCoroutineScope
 ) {
 
-    fun iniciarProcesoExportacion(
-        vistaActual: MainActivity.Vista,
-        listaGastos: List<Gasto>,
-        viewsParaCapturar: VistasCaptura
-    ) {
-        if (listaGastos.isEmpty()) {
-            Toast.makeText(context, "No hay gastos para exportar", Toast.LENGTH_SHORT).show()
-            return
-        }
+    // Enum para saber qué ha elegido el usuario en el primer menú
+    enum class Accion { IMAGEN_VISTA, EXPORTAR_DATOS, IMPORTAR_DATOS }
 
-        mostrarMenuFormato { esImagen ->
-            mostrarMenuAccion { guardarEnDispositivo ->
-                procesarExportacion(esImagen, guardarEnDispositivo, vistaActual, listaGastos, viewsParaCapturar)
-            }
-        }
-    }
-
-    // CAMBIO 1: Añadimos 'layoutVistaCategorias' a la clase de datos
+    // Clase de vistas para capturar (igual que antes)
     data class VistasCaptura(
         val cardResumen: View,
         val layoutNavegacion: View,
         val chartBarras: BarChart,
         val chartQuesitos: PieChart,
         val rvCalendario: View,
-        val layoutVistaCategorias: View // <--- NUEVO CAMPO
+        val layoutVistaCategorias: View
     )
 
-    private fun mostrarMenuFormato(onFormatoElegido: (Boolean) -> Unit) {
-        val opciones = arrayOf("Imagen Larga (JPG)", "Hoja de Cálculo (CSV)")
+    fun mostrarMenuPrincipal(onOpcionElegida: (Accion) -> Unit) {
+        val opciones = arrayOf(
+            "📷 Compartir Vista Actual (Imagen)",
+            "💾 Crear Copia de Seguridad / Exportar", // Aquí agrupamos todo
+            "📥 Restaurar Copia de Seguridad"
+        )
+
         AlertDialog.Builder(context)
-            .setTitle("1. Elige el formato")
-            .setItems(opciones) { _, w -> onFormatoElegido(w == 0) }
+            .setTitle("Menú de Exportación")
+            .setItems(opciones) { _, which ->
+                when (which) {
+                    0 -> onOpcionElegida(Accion.IMAGEN_VISTA)
+                    1 -> onOpcionElegida(Accion.EXPORTAR_DATOS)
+                    2 -> onOpcionElegida(Accion.IMPORTAR_DATOS)
+                }
+            }
             .show()
     }
 
-    private fun mostrarMenuAccion(onAccionElegida: (Boolean) -> Unit) {
-        val opciones = arrayOf("Guardar en Dispositivo", "Compartir")
-        AlertDialog.Builder(context)
-            .setTitle("2. ¿Qué hacer?")
-            .setItems(opciones) { _, w -> onAccionElegida(w == 0) }
-            .show()
-    }
+    // --- LÓGICA DE IMAGEN (Se mantiene aquí porque es visual) ---
 
-    private fun procesarExportacion(
-        esImagen: Boolean,
-        guardar: Boolean,
+    fun procesarCapturaImagen(
         vistaActual: MainActivity.Vista,
-        lista: List<Gasto>,
-        vistas: VistasCaptura
+        listaGastos: List<Gasto>,
+        vistas: VistasCaptura,
+        onTerminado: (Bitmap?) -> Unit
     ) {
-        if (!esImagen) {
-            // EXPORTAR CSV
-            val csvContent = ExportarHelper.generarTextoCSV(lista)
-            finalizar(null, csvContent, guardar)
-            return
-        }
-
-        // EXPORTAR IMAGEN
         if (vistaActual == MainActivity.Vista.LISTA) {
-            generarImagenListaAsync(lista, vistas, guardar)
+            generarImagenListaAsync(listaGastos, vistas) { bitmap -> onTerminado(bitmap) }
         } else {
-            // Capturas simples (Gráficas o Calendario)
+            // Capturas simples
             val bitmapCaptura = when (vistaActual) {
                 MainActivity.Vista.GRAFICA -> vistas.chartBarras.chartBitmap
-
-                // CAMBIO 2: En lugar de capturar solo el chart, capturamos TODO el layout (Chart + Lista)
                 MainActivity.Vista.QUESITOS -> ExportarHelper.capturarVista(vistas.layoutVistaCategorias)
-
                 MainActivity.Vista.CALENDARIO -> ExportarHelper.capturarVista(vistas.rvCalendario)
                 else -> null
             }
-
+            // Unir con cabecera
             if (bitmapCaptura != null) {
-                val bitmapFinal = ExportarHelper.unirVistasEnBitmap(
-                    vistas.cardResumen,
-                    vistas.layoutNavegacion,
-                    bitmapCaptura
-                )
-                finalizar(bitmapFinal, null, guardar)
+                val final = ExportarHelper.unirVistasEnBitmap(vistas.cardResumen, vistas.layoutNavegacion, bitmapCaptura)
+                onTerminado(final)
+            } else {
+                onTerminado(null)
             }
         }
     }
 
-    private fun generarImagenListaAsync(lista: List<Gasto>, vistas: VistasCaptura, guardar: Boolean) {
+    private fun generarImagenListaAsync(lista: List<Gasto>, vistas: VistasCaptura, callback: (Bitmap?) -> Unit) {
         val progress = AlertDialog.Builder(context).setMessage("Generando imagen...").setCancelable(false).show()
 
         scope.launch(Dispatchers.IO) {
@@ -125,13 +102,8 @@ class ExportManager(
                     lista,
                     mapaBitmaps
                 )
-                finalizar(bitmapFinal, null, guardar)
+                callback(bitmapFinal)
             }
         }
-    }
-
-    private fun finalizar(bitmap: Bitmap?, texto: String?, guardar: Boolean) {
-        if (guardar) ExportarHelper.guardarEnDispositivo(context, bitmap, texto, true)
-        else ExportarHelper.compartir(context, bitmap, texto, true)
     }
 }
