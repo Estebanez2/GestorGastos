@@ -106,4 +106,8 @@ interface GastoDao {
     // Busca si existe un gasto IDÉNTICO (mismo nombre, cantidad y fecha exacta)
     @Query("SELECT * FROM tabla_gastos WHERE nombre = :nombre AND cantidad = :cantidad AND fecha = :fecha LIMIT 1")
     suspend fun buscarDuplicado(nombre: String, cantidad: Double, fecha: Long): Gasto?
+
+    // Para exportar por rango (fechaInicio <= fecha <= fechaFin)
+    @Query("SELECT * FROM tabla_gastos WHERE fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
+    suspend fun obtenerGastosEnRangoDirecto(inicio: Long, fin: Long): List<Gasto>
 }

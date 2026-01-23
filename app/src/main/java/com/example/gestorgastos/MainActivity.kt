@@ -1,5 +1,12 @@
 package com.example.gestorgastos
 
+import android.Manifest
+import android.app.DatePickerDialog
+import android.content.ContentValues
+import android.content.Intent
+import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
@@ -17,13 +24,16 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.bumptech.glide.Glide
+import com.example.gestorgastos.data.FiltroBusqueda
 import com.example.gestorgastos.data.Gasto
+import com.example.gestorgastos.data.ModoFiltroFecha
 import com.example.gestorgastos.databinding.ActivityMainBinding
 import com.example.gestorgastos.ui.*
 import com.github.mikephil.charting.animation.Easing
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Calendar
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -48,7 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var categoriaSeleccionada: String? = null
 
     // Variables para Fotos
-    private var uriFotoTemporal: android.net.Uri? = null
+    private var uriFotoTemporal: Uri? = null
     private var uriFotoFinal: String? = null
     private var ivPreviewActual: ImageView? = null
 
@@ -171,7 +181,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnBorrarSeleccionados.setOnClickListener {
             val seleccionados = adapterLista.obtenerGastosSeleccionados()
             if (seleccionados.isNotEmpty()) {
-                androidx.appcompat.app.AlertDialog.Builder(this)
+                AlertDialog.Builder(this)
                     .setTitle("Borrar Gastos")
                     .setMessage("¿Estás seguro de borrar ${seleccionados.size} gastos?")
                     .setPositiveButton("Borrar") { _, _ ->
@@ -187,7 +197,7 @@ class MainActivity : AppCompatActivity() {
 
                         // D. Mostramos Snackbar con botón DESHACER
                         var deshacerPulsado = false
-                        com.google.android.material.snackbar.Snackbar.make(
+                        Snackbar.make(
                             binding.root,
                             "${seleccionados.size} gastos eliminados",
                             5000 // 5 segundos de duración
@@ -209,7 +219,7 @@ class MainActivity : AppCompatActivity() {
             exportManager.mostrarMenuPrincipal { accion ->
                 when (accion) {
                     ExportManager.Accion.IMAGEN_VISTA -> manejarExportacionImagen()
-                    ExportManager.Accion.EXPORTAR_DATOS -> manejarExportacionDatos()
+                    ExportManager.Accion.EXPORTAR_DATOS -> mostrarDialogoSeleccionRango()
                     ExportManager.Accion.IMPORTAR_DATOS -> manejarImportacionDatos()
                 }
             }
@@ -217,7 +227,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
         binding.btnMesSiguiente.setOnClickListener { viewModel.mesSiguiente() }
-        binding.btnCategorias.setOnClickListener { startActivity(android.content.Intent(this, CategoriasActivity::class.java)) }
+        binding.btnCategorias.setOnClickListener { startActivity(Intent(this,CategoriasActivity::class.java)) }
 
         // Menú vistas
         binding.btnCambiarVista.setOnClickListener { view ->
@@ -275,10 +285,10 @@ class MainActivity : AppCompatActivity() {
 
                 // Decidimos el título según el MODO de fecha elegido
                 when (filtro?.modoFecha) {
-                    com.example.gestorgastos.data.ModoFiltroFecha.TODOS -> {
+                    ModoFiltroFecha.TODOS -> {
                         binding.tvMesTitulo.text = "Historial Completo (${lista.size})"
                     }
-                    com.example.gestorgastos.data.ModoFiltroFecha.RANGO_FECHAS -> {
+                    ModoFiltroFecha.RANGO_FECHAS -> {
                         // Formateamos las fechas: "01/02/25 - 15/03/25 (X)"
                         val sdf = java.text.SimpleDateFormat("dd/MM/yy", Locale.getDefault())
                         val ini = filtro.fechaInicioAbs?.let { sdf.format(java.util.Date(it)) } ?: "?"
@@ -363,7 +373,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- LÓGICA BUSCADOR NUEVA ---
-    private fun abrirBuscador(filtroPreexistente: com.example.gestorgastos.data.FiltroBusqueda?) {
+    private fun abrirBuscador(filtroPreexistente: FiltroBusqueda?) {
         val categorias = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
         buscadorManager.mostrarBuscador(categorias, filtroPreexistente) { filtro ->
             viewModel.aplicarFiltro(filtro)
@@ -464,7 +474,7 @@ class MainActivity : AppCompatActivity() {
     private fun checkCameraPermissionAndOpen() {
         ejecutarConPermisoCamara(
             onGranted = { abrirCamara() },
-            onDenied = { requestCameraLauncher.launch(android.Manifest.permission.CAMERA) }
+            onDenied = { requestCameraLauncher.launch(Manifest.permission.CAMERA) }
         )
     }
 
@@ -511,7 +521,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- LÓGICA DE EXPORTAR DATOS (BACKUP) ---
-    private fun manejarExportacionDatos() {
+    // Antes se llamaba manejarExportacionDatos, ahora recibe el rango ya decidido
+    private fun mostrarDialogoFormato(inicio: Long, fin: Long) {
         val opciones = arrayOf(
             "📦 Completa con Fotos (ZIP)",
             "📄 Solo Datos (JSON)",
@@ -519,41 +530,41 @@ class MainActivity : AppCompatActivity() {
         )
 
         AlertDialog.Builder(this)
-            .setTitle("Elige el formato")
+            .setTitle("2. Elige el formato") // Título actualizado
             .setItems(opciones) { _, which ->
                 when (which) {
-                    0 -> realizarBackup(incluirFotos = true)
-                    1 -> realizarBackup(incluirFotos = false)
-                    2 -> realizarExportacionSoloCSV()
+                    0 -> realizarBackup(incluirFotos = true, inicio, fin)
+                    1 -> realizarBackup(incluirFotos = false, inicio, fin)
+                    2 -> realizarExportacionSoloCSV(inicio, fin)
                 }
             }
-            .setNegativeButton("Cancelar", null)
+            .setNegativeButton("Atrás") { _, _ -> mostrarDialogoSeleccionRango() } // Volver atrás
             .show()
     }
 
-    private fun realizarBackup(incluirFotos: Boolean) {
+    private fun realizarBackup(incluirFotos: Boolean, inicio: Long, fin: Long) {
         val mensaje = if (incluirFotos) "Generando ZIP con fotos..." else "Generando JSON..."
-        val progress = androidx.appcompat.app.AlertDialog.Builder(this)
+        val progress = AlertDialog.Builder(this)
             .setMessage(mensaje)
             .setCancelable(false)
             .show()
 
         lifecycleScope.launch {
-            val archivo = dataTransferManager.exportarDatos(incluirFotos)
+            val archivo = dataTransferManager.exportarDatos(incluirFotos, inicio, fin)
             progress.dismiss()
             // Llamamos al helper común
             mostrarDialogoPostExportacion(archivo, if (incluirFotos) "application/zip" else "application/json")
         }
     }
 
-    private fun realizarExportacionSoloCSV() {
-        val progress = androidx.appcompat.app.AlertDialog.Builder(this)
+    private fun realizarExportacionSoloCSV(inicio: Long, fin: Long) {
+        val progress = AlertDialog.Builder(this)
             .setMessage("Generando CSV...")
             .setCancelable(false)
             .show()
 
         lifecycleScope.launch {
-            val archivo = dataTransferManager.exportarSoloCSV()
+            val archivo = dataTransferManager.exportarSoloCSV(inicio, fin)
             progress.dismiss()
             // Llamamos al helper común
             mostrarDialogoPostExportacion(archivo, "text/csv")
@@ -567,12 +578,12 @@ class MainActivity : AppCompatActivity() {
                 .setMessage("Nombre: ${archivo.name}")
                 .setPositiveButton("Compartir / Enviar") { _, _ ->
                     val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivo)
-                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    val intent = Intent(android.content.Intent.ACTION_SEND).apply {
                         type = mimeType
-                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    startActivity(android.content.Intent.createChooser(intent, "Enviar a..."))
+                    startActivity(Intent.createChooser(intent, "Enviar a..."))
                 }
                 .setNegativeButton("Guardar en Descargas") { _, _ ->
                     copiarADescargas(archivo, mimeType)
@@ -586,13 +597,13 @@ class MainActivity : AppCompatActivity() {
     // Función rápida para mover el archivo de cache a Descargas
     private fun copiarADescargas(archivo: File, mime: String) {
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // --- OPCIÓN A: ANDROID 10+ (API 29+) ---
                 // Usamos MediaStore como tenías, que no requiere permisos de escritura en el Manifest
-                val contentValues = android.content.ContentValues().apply {
+                val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, archivo.name)
                     put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/GestorGastos")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/GestorGastos")
                 }
 
                 val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
@@ -622,7 +633,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // Avisamos al sistema para que el archivo aparezca si conectas el móvil al PC
-                android.media.MediaScannerConnection.scanFile(
+                MediaScannerConnection.scanFile(
                     this,
                     arrayOf(archivoDestino.absolutePath),
                     arrayOf(mime),
@@ -643,7 +654,7 @@ class MainActivity : AppCompatActivity() {
         importFileLauncher.launch("*/*")
     }
 
-    private fun mostrarDialogoModoImportacion(uri: android.net.Uri) {
+    private fun mostrarDialogoModoImportacion(uri: Uri) {
         AlertDialog.Builder(this)
             .setTitle("Modo de Importación")
             .setMessage("¿Cómo quieres importar estos datos?")
@@ -665,7 +676,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun confirmarImportacion(uri: android.net.Uri, sustituir: Boolean) {
+    private fun confirmarImportacion(uri: Uri, sustituir: Boolean) {
         val progress = AlertDialog.Builder(this)
             .setMessage("Analizando archivo...")
             .setCancelable(false)
@@ -706,5 +717,80 @@ class MainActivity : AppCompatActivity() {
 
         val msg = if (cantidad > 0) "Importados $cantidad gastos nuevos." else "Importación completada."
         Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+    }
+
+    private fun mostrarDialogoSeleccionRango() {
+        val opciones = arrayOf(
+            "📅 Mes Actual (${viewModel.mesActual.value?.month?.getDisplayName(java.time.format.TextStyle.FULL, Locale("es", "ES"))})",
+            "📆 Elegir Fechas (Personalizado)",
+            "🗄️ Todo el Historial (Base de Datos completa)"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("1. Selecciona el Rango")
+            .setItems(opciones) { _, which ->
+                when (which) {
+                    0 -> {
+                        // Opción: Mes Actual
+                        val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
+                        val inicio = mes.atDay(1).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        val fin = mes.atEndOfMonth().atTime(23, 59, 59).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+                        mostrarDialogoFormato(inicio, fin) // Pasamos al siguiente paso
+                    }
+                    1 -> {
+                        // Opción: Personalizado -> Abrimos DatePicker
+                        mostrarSelectorRangoFechas()
+                    }
+                    2 -> {
+                        // Opción: Todo
+                        mostrarDialogoFormato(0L, Long.MAX_VALUE)
+                    }
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun mostrarSelectorRangoFechas() {
+        val calendario = java.util.Calendar.getInstance()
+
+        // 1. Elegir FECHA INICIO
+        DatePickerDialog(
+            this,
+            { _, year1, month1, day1 ->
+                val inicioCal = Calendar.getInstance()
+                inicioCal.set(year1, month1, day1, 0, 0, 0)
+                val inicioMs = inicioCal.timeInMillis
+
+                // 2. Elegir FECHA FIN (Al aceptar la primera)
+                DatePickerDialog(this, { _, year2, month2, day2 ->
+                    val finCal = Calendar.getInstance()
+                    finCal.set(year2, month2, day2, 23, 59, 59)
+                    val finMs = finCal.timeInMillis
+
+                    if (inicioMs > finMs) {
+                        Toast.makeText(
+                            this,
+                            "La fecha inicio no puede ser mayor al fin",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        mostrarDialogoFormato(inicioMs, finMs) // Pasamos al siguiente paso
+                    }
+
+                }, year1, month1, day1).apply {
+                    setTitle("Fecha Fin")
+                    show()
+                }
+
+            },
+            calendario.get(Calendar.YEAR),
+            calendario.get(Calendar.MONTH),
+            calendario.get(Calendar.DAY_OF_MONTH)
+        ).apply {
+            setTitle("Fecha Inicio")
+            show()
+        }
     }
 }

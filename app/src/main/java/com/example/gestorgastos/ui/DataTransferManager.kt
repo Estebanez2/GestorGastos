@@ -39,9 +39,9 @@ class DataTransferManager(private val context: Context) {
 
     // --- EXPORTAR (SIN CAMBIOS, PERO INCLUIDO PARA QUE EL ARCHIVO ESTÉ COMPLETO) ---
 
-    suspend fun exportarDatos(incluirFotos: Boolean): File? = withContext(Dispatchers.IO) {
+    suspend fun exportarDatos(incluirFotos: Boolean, inicio: Long, fin: Long): File? = withContext(Dispatchers.IO) {
         try {
-            val gastos = dao.obtenerTodosLosGastosDirecto()
+            val gastos = dao.obtenerGastosEnRangoDirecto(inicio, fin)
             val categorias = dao.obtenerTodasLasCategoriasDirecto()
             val timeStamp = System.currentTimeMillis()
             val nombreBase = "backup_gastos_$timeStamp"
@@ -130,9 +130,9 @@ class DataTransferManager(private val context: Context) {
         }
     }
 
-    suspend fun exportarSoloCSV(): File? = withContext(Dispatchers.IO) {
+    suspend fun exportarSoloCSV(inicio: Long, fin: Long): File? = withContext(Dispatchers.IO) {
         try {
-            val gastos = dao.obtenerTodosLosGastosDirecto()
+            val gastos = dao.obtenerGastosEnRangoDirecto(inicio, fin)
             val csvContent = generarCsvParaZip(gastos)
             val timeStamp = System.currentTimeMillis()
             val file = File(context.externalCacheDir, "gastos_$timeStamp.csv")
