@@ -31,6 +31,7 @@ import com.example.gestorgastos.databinding.ActivityMainBinding
 import com.example.gestorgastos.ui.*
 import com.github.mikephil.charting.animation.Easing
 import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Calendar
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapterGastosCategoria: GastoAdapter
     private lateinit var dataTransferManager: DataTransferManager
     private lateinit var conflictosManager: ConflictosManager
+    private lateinit var catConflictosManager: CategoriaConflictosManager
     private var adapterCalendario: CalendarioAdapter? = null
 
     enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
@@ -117,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         exportManager = ExportManager(this, lifecycleScope)
         dataTransferManager = DataTransferManager(this)
         conflictosManager = ConflictosManager(this)
+        catConflictosManager = CategoriaConflictosManager(this)
     }
 
     private fun setupVistas() {
@@ -676,37 +679,57 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun confirmarImportacion(uri: Uri, sustituir: Boolean) {
-        val progress = AlertDialog.Builder(this)
+    private fun confirmarImportacion(uri: android.net.Uri, sustituir: Boolean) {
+        val progress = androidx.appcompat.app.AlertDialog.Builder(this)
             .setMessage("Analizando archivo...")
             .setCancelable(false)
             .show()
 
         lifecycleScope.launch {
-            // Importamos (esto guarda los NO conflictivos y devuelve los conflictivos)
             val resultado = dataTransferManager.importarDatos(uri, sustituir)
             progress.dismiss()
 
             if (resultado.exito) {
-
-                // CASO A: Importación limpia o Sustitución total
-                if (resultado.conflictos.isEmpty()) {
-                    finalizarImportacionExito(resultado.gastosInsertados)
-                }
-                // CASO B: Hay duplicados para resolver
-                else {
-                    conflictosManager.mostrarDialogoResolucion(resultado.conflictos) { descartar, reemplazar, duplicar ->
-                        // Cuando el usuario pulsa un botón en el diálogo, volvemos aquí
+                // PASO 1: Resolver Conflictos de GASTOS
+                if (resultado.conflictosGastos.isNotEmpty()) {
+                    conflictosManager.mostrarDialogoResolucion(resultado.conflictosGastos) { descartar, reemplazar, duplicar ->
                         lifecycleScope.launch {
                             dataTransferManager.resolverConflictos(descartar, reemplazar, duplicar)
-                            // Refrescamos UI (aunque sea parcialmente)
-                            viewModel.limpiarFiltro()
+                            // Una vez resueltos los gastos -> PASO 2
+                            procesarConflictosCategorias(resultado.conflictosCategorias, resultado.gastosInsertados)
                         }
                     }
+                } else {
+                    // Si no hubo conflictos de gastos, vamos directo al PASO 2
+                    procesarConflictosCategorias(resultado.conflictosCategorias, resultado.gastosInsertados)
                 }
             } else {
                 Toast.makeText(this@MainActivity, "Error al importar.", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    private fun procesarConflictosCategorias(conflictos: List<DataTransferManager.ConflictoCategoria>, gastosNuevos: Int) {
+        if (conflictos.isNotEmpty()) {
+            // Convertimos a MutableList para ir borrándolos de la cola
+            catConflictosManager.resolverConflictos(
+                conflictos.toMutableList(),
+                onDecisionTomada = { conflicto, usarNueva ->
+                    if (usarNueva) {
+                        // Si el usuario quiere la nueva, actualizamos la BD
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            dataTransferManager.actualizarFotoCategoria(conflicto.categoriaNombre, conflicto.uriNueva)
+                        }
+                    }
+                },
+                onTodosResueltos = {
+                    // PASO 3: FINALIZAR
+                    finalizarImportacionExito(gastosNuevos)
+                }
+            )
+        } else {
+            // Si no hay conflictos de categorías -> FIN
+            finalizarImportacionExito(gastosNuevos)
         }
     }
 

@@ -31,10 +31,17 @@ class DataTransferManager(private val context: Context) {
         val nuevoImportado: Gasto
     )
 
+    data class ConflictoCategoria(
+        val categoriaNombre: String,
+        val uriActual: String?,
+        val uriNueva: String?
+    )
+
     data class ResultadoImportacion(
         val exito: Boolean,
         val gastosInsertados: Int = 0,
-        val conflictos: List<ConflictoGasto> = emptyList() // Lista de repetidos para revisar
+        val conflictosGastos: List<ConflictoGasto> = emptyList(),
+        val conflictosCategorias: List<ConflictoCategoria> = emptyList()
     )
 
     // --- EXPORTAR (SIN CAMBIOS, PERO INCLUIDO PARA QUE EL ARCHIVO ESTÉ COMPLETO) ---
@@ -43,8 +50,7 @@ class DataTransferManager(private val context: Context) {
         try {
             val gastos = dao.obtenerGastosEnRangoDirecto(inicio, fin)
             val categorias = dao.obtenerTodasLasCategoriasDirecto()
-            val timeStamp = System.currentTimeMillis()
-            val nombreBase = "backup_gastos_$timeStamp"
+            val nombreBase = generarNombreArchivo(inicio, fin)
 
             val mapaNombresFotos = mutableMapOf<String, String>()
 
@@ -99,7 +105,7 @@ class DataTransferManager(private val context: Context) {
                 val fos = FileOutputStream(zipFile)
                 val zos = ZipOutputStream(BufferedOutputStream(fos))
 
-                zos.putNextEntry(ZipEntry("data.json"))
+                zos.putNextEntry(ZipEntry("gastos.json"))
                 zos.write(jsonString.toByteArray())
                 zos.closeEntry()
 
@@ -134,8 +140,8 @@ class DataTransferManager(private val context: Context) {
         try {
             val gastos = dao.obtenerGastosEnRangoDirecto(inicio, fin)
             val csvContent = generarCsvParaZip(gastos)
-            val timeStamp = System.currentTimeMillis()
-            val file = File(context.externalCacheDir, "gastos_$timeStamp.csv")
+            val nombreArchivo = generarNombreArchivo(inicio, fin)
+            val file = File(context.externalCacheDir, "$nombreArchivo.csv")
             file.writeText(csvContent)
             return@withContext file
         } catch (e: Exception) {
@@ -144,65 +150,102 @@ class DataTransferManager(private val context: Context) {
         }
     }
 
-    // --- IMPORTAR (CON DETECCIÓN DE DUPLICADOS) ---
+    // --- IMPORTAR (SOPORTE PARA ZIP, JSON Y CSV) ---
 
     suspend fun importarDatos(uriArchivo: Uri, modoSustituir: Boolean): ResultadoImportacion = withContext(Dispatchers.IO) {
         try {
             val contentResolver = context.contentResolver
             val nombreArchivo = obtenerNombreArchivo(uriArchivo)
-            val esZip = nombreArchivo.endsWith(".zip", true)
 
-            var jsonString = ""
+            // Detectamos el tipo de archivo
+            val esZip = nombreArchivo.endsWith(".zip", true)
+            val esCsv = nombreArchivo.endsWith(".csv", true)
+
+            var backupData: BackupData? = null
             val mapaFotosNuevas = mutableMapOf<String, String>()
 
-            if (!esZip) {
-                jsonString = contentResolver.openInputStream(uriArchivo)?.bufferedReader().use { it?.readText() } ?: ""
-            } else {
+            if (esZip) {
+                // --- MODO ZIP ---
                 val inputStream = contentResolver.openInputStream(uriArchivo) ?: return@withContext ResultadoImportacion(false)
                 val zis = ZipInputStream(BufferedInputStream(inputStream))
                 var entry: ZipEntry?
+                var jsonString = ""
 
                 while (zis.nextEntry.also { entry = it } != null) {
                     val nombreEntry = entry!!.name
-                    if (nombreEntry == "data.json") {
+                    if (nombreEntry == "gastos.json") {
                         jsonString = zis.bufferedReader().readText()
                     } else if (nombreEntry.startsWith("images/")) {
+                        // ... (Lógica de extracción de fotos igual que antes) ...
                         val nombreArchivoSolo = File(nombreEntry).name
                         val archivoDestino = File(context.filesDir, "imported_${System.currentTimeMillis()}_$nombreArchivoSolo")
                         val fos = FileOutputStream(archivoDestino)
                         zis.copyTo(fos)
                         fos.close()
-                        val nuevaUri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", archivoDestino).toString()
+                        val nuevaUri = androidx.core.content.FileProvider.getUriForFile(
+                            context, "${context.packageName}.fileprovider", archivoDestino
+                        ).toString()
                         mapaFotosNuevas[nombreEntry] = nuevaUri
                     }
                 }
                 zis.close()
+                if (jsonString.isNotEmpty()) {
+                    backupData = gson.fromJson(jsonString, BackupData::class.java)
+                }
+
+            } else if (esCsv) {
+                // --- MODO CSV (NUEVO) ---
+                val csvContent = contentResolver.openInputStream(uriArchivo)?.bufferedReader().use { it?.readText() } ?: ""
+                // Convertimos el texto CSV a objetos Gasto y Categorias
+                backupData = leerCsvYConvertirAGastos(csvContent)
+
+            } else {
+                // --- MODO JSON (Asumimos JSON si no es zip ni csv) ---
+                val jsonString = contentResolver.openInputStream(uriArchivo)?.bufferedReader().use { it?.readText() } ?: ""
+                if (jsonString.isNotEmpty()) {
+                    backupData = gson.fromJson(jsonString, BackupData::class.java)
+                }
             }
 
-            if (jsonString.isEmpty()) return@withContext ResultadoImportacion(false)
+            if (backupData == null) return@withContext ResultadoImportacion(false)
 
-            val backupData = gson.fromJson(jsonString, BackupData::class.java)
+            // ---------------------------------------------------------
+            // A PARTIR DE AQUÍ LA LÓGICA ES COMÚN PARA TODOS LOS FORMATOS
+            // ---------------------------------------------------------
 
-            // 1. SI ES MODO SUSTITUIR -> Borramos todo. No hay duplicados posibles.
+            // 1. MODO SUSTITUIR
             if (modoSustituir) {
                 dao.borrarTodosLosGastos()
             }
 
-            // 2. CATEGORÍAS (Lógica de mezcla inteligente que hicimos antes)
+            // 2. PROCESAR CATEGORÍAS
             val categoriasFinales = mutableListOf<Categoria>()
+            val conflictosCategorias = mutableListOf<ConflictoCategoria>()
+
             for (catImportada in backupData.categorias) {
                 val catExistente = dao.obtenerCategoriaPorNombre(catImportada.nombre)
                 val uriImportada = recuperarUriFoto(catImportada.uriFoto, mapaFotosNuevas)
+
                 if (catExistente != null) {
-                    val uriFinal = if (catExistente.uriFoto != null) catExistente.uriFoto else uriImportada
-                    categoriasFinales.add(catImportada.copy(uriFoto = uriFinal))
+                    // La categoría existe. ¿Tiene foto importada?
+                    if (uriImportada != null) {
+                        // REGLA: Si trae foto nueva, PREGUNTAMOS SIEMPRE (incluso si la local ya tiene foto o es icono)
+                        conflictosCategorias.add(ConflictoCategoria(
+                            categoriaNombre = catExistente.nombre,
+                            uriActual = catExistente.uriFoto,
+                            uriNueva = uriImportada
+                        ))
+                    }
+                    // Mientras decidimos, mantenemos la actual en la lista para que no falle la FK de los gastos
+                    categoriasFinales.add(catExistente)
                 } else {
+                    // No existe, la creamos tal cual viene
                     categoriasFinales.add(catImportada.copy(uriFoto = uriImportada))
                 }
             }
             dao.insertarListaCategorias(categoriasFinales)
 
-            // 3. GASTOS: DETECCIÓN DE DUPLICADOS
+            // 3. PROCESAR GASTOS Y DETECTAR DUPLICADOS
             val gastosParaInsertar = mutableListOf<Gasto>()
             val listaConflictos = mutableListOf<ConflictoGasto>()
 
@@ -211,37 +254,101 @@ class DataTransferManager(private val context: Context) {
                 val gastoCandidato = gastoRaw.copy(id = 0L, uriFoto = nuevaUri)
 
                 if (modoSustituir) {
-                    // Si estamos sustituyendo, entra todo directo
                     gastosParaInsertar.add(gastoCandidato)
                 } else {
-                    // Si estamos AÑADIENDO, verificamos si ya existe
                     val duplicado = dao.buscarDuplicado(gastoCandidato.nombre, gastoCandidato.cantidad, gastoCandidato.fecha)
-
                     if (duplicado != null) {
-                        // ¡CONFLICTO! Lo guardamos para que el usuario decida
                         listaConflictos.add(ConflictoGasto(existente = duplicado, nuevoImportado = gastoCandidato))
                     } else {
-                        // Limpio, adentro
                         gastosParaInsertar.add(gastoCandidato)
                     }
                 }
             }
 
-            // Insertamos los que son seguros (nuevos o todos si sustituimos)
             if (gastosParaInsertar.isNotEmpty()) {
                 dao.insertarListaGastos(gastosParaInsertar)
             }
 
-            // Devolvemos resultado. Si listaConflictos no está vacía, el Main tendrá que actuar.
-            return@withContext ResultadoImportacion(true, gastosParaInsertar.size, listaConflictos)
-
+            return@withContext ResultadoImportacion(true, gastosParaInsertar.size, listaConflictos, conflictosCategorias)
         } catch (e: Exception) {
             e.printStackTrace()
             return@withContext ResultadoImportacion(false)
         }
     }
 
-    // --- NUEVO HELPER PÚBLICO: RESOLVER CONFLICTOS ---
+    // --- PARSEAR CSV MANUALMENTE ---
+    private fun leerCsvYConvertirAGastos(csvContent: String): BackupData {
+        val lineas = csvContent.lines()
+        val gastos = mutableListOf<Gasto>()
+        val nombresCategoriasVistas = mutableSetOf<String>()
+
+        // 1. DEFINIMOS LOS 3 NIVELES DE PRECISIÓN
+        val sdfFull = SimpleDateFormat("dd/MM/yyyy HH:mm:ss.SSS", Locale.getDefault()) // Formato CSV Nuevo (Perfecto)
+        val sdfSeconds = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())  // Formato Intermedio
+        val sdfDay = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())               // Formato Antiguo o Excel Manual
+
+        val primeraLinea = lineas.firstOrNull() ?: return BackupData(gastos = emptyList(), categorias = emptyList())
+
+        // Detectamos cabecera genérica (ya sea "Fecha;" o "FechaHora;")
+        val inicioDatos = if (primeraLinea.startsWith("Fecha")) 1 else 0
+
+        for (i in inicioDatos until lineas.size) {
+            val linea = lineas[i].trim()
+            if (linea.isEmpty()) continue
+
+            try {
+                // Formato esperado: Fecha;Categoria;Nombre;Descripcion;Cantidad;Imagen
+                val partes = linea.split(";")
+                if (partes.size >= 5) {
+                    val fechaStr = partes[0]
+                    val categoria = partes[1]
+                    val nombre = partes[2]
+                    val descripcion = partes[3]
+                    val cantidadStr = partes[4]
+                    val uriFoto = if (partes.size > 5) partes[5].ifEmpty { null } else null
+
+                    // 2. LÓGICA EN CASCADA (Try-Catch anidados)
+                    // Intentamos leer de lo más preciso a lo más simple
+                    val fecha = try {
+                        sdfFull.parse(fechaStr)?.time // ¿Tiene milisegundos?
+                    } catch (e: Exception) {
+                        try {
+                            sdfSeconds.parse(fechaStr)?.time // ¿Tiene segundos?
+                        } catch (e2: Exception) {
+                            try {
+                                sdfDay.parse(fechaStr)?.time // ¿Es solo fecha (dd/MM/yyyy)?
+                            } catch (e3: Exception) {
+                                System.currentTimeMillis() // Si todo falla, ponemos fecha actual
+                            }
+                        }
+                    } ?: System.currentTimeMillis()
+
+                    val cantidad = try { cantidadStr.replace(",", ".").toDouble() } catch (e: Exception) { 0.0 }
+
+                    val gasto = Gasto(
+                        nombre = nombre,
+                        cantidad = cantidad,
+                        descripcion = descripcion,
+                        categoria = categoria,
+                        fecha = fecha,
+                        uriFoto = uriFoto
+                    )
+                    gastos.add(gasto)
+                    nombresCategoriasVistas.add(categoria)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        val categorias = nombresCategoriasVistas.map { nombreCat ->
+            Categoria(nombre = nombreCat, uriFoto = null)
+        }
+
+        return BackupData(gastos = gastos, categorias = categorias)
+    }
+
+
     // Esta función la llamará el Main cuando el usuario decida qué hacer con los repetidos
     suspend fun resolverConflictos(
         aDescartar: List<ConflictoGasto>,
@@ -265,8 +372,6 @@ class DataTransferManager(private val context: Context) {
         }
     }
 
-    // --- HELPERS PRIVADOS (IGUAL QUE ANTES) ---
-
     private fun sanitizarNombreArchivo(nombre: String): String {
         return nombre.replace(Regex("[^a-zA-Z0-9._-]"), "_")
     }
@@ -282,8 +387,8 @@ class DataTransferManager(private val context: Context) {
 
     private fun generarCsvParaZip(gastos: List<Gasto>): String {
         val sb = StringBuilder()
-        sb.append("Fecha;Categoria;Nombre;Descripcion;Cantidad;NombreArchivoImagen\n")
-        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        sb.append("FechaHora;Categoria;Nombre;Descripcion;Cantidad;NombreArchivoImagen\n")
+        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss.SSS", Locale.getDefault())
         for (g in gastos) {
             val fecha = sdf.format(Date(g.fecha))
             val nombre = g.nombre.replace(";", ",")
@@ -307,5 +412,36 @@ class DataTransferManager(private val context: Context) {
             }
         } catch (e: Exception) { e.printStackTrace() }
         return result
+    }
+
+    // --- HELPER PARA NOMBRES DE ARCHIVO DEFINITIVOS ---
+    private fun generarNombreArchivo(inicio: Long, fin: Long): String {
+        val sdfDia = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+        val now = Date()
+
+        // CASO A: HISTORIAL COMPLETO -> "CopiaSeguridad" + FECHA + HORA
+        if (inicio == 0L && fin == Long.MAX_VALUE) {
+            val fechaHora = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(now)
+            return "GestorGastos_HistorialCompleto_$fechaHora"
+        }
+
+        // CASO B: RANGO PARCIAL -> "Exportar"
+        val fInicio = sdfDia.format(Date(inicio))
+        val fFin = sdfDia.format(Date(fin))
+
+        // Si es un solo día (ej: Exportar solo hoy)
+        if (fInicio == fFin) {
+            return "GestorGastos_Exportar_$fInicio"
+        }
+
+        // Si es un rango -> Conector "_a_"
+        return "GestorGastos_Exportar_${fInicio}_a_${fFin}"
+    }
+
+    suspend fun actualizarFotoCategoria(nombreCategoria: String, nuevaUri: String?) {
+        val cat = dao.obtenerCategoriaPorNombre(nombreCategoria)
+        if (cat != null) {
+            dao.actualizarCategoria(cat.copy(uriFoto = nuevaUri))
+        }
     }
 }

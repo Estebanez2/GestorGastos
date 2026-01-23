@@ -110,4 +110,7 @@ interface GastoDao {
     // Para exportar por rango (fechaInicio <= fecha <= fechaFin)
     @Query("SELECT * FROM tabla_gastos WHERE fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
     suspend fun obtenerGastosEnRangoDirecto(inicio: Long, fin: Long): List<Gasto>
+
+    @Update
+    suspend fun actualizarCategoria(categoria: Categoria)
 }
