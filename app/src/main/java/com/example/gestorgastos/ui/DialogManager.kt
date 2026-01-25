@@ -159,24 +159,38 @@ class DialogManager(private val context: Context) {
     }
 
     private fun configurarPreviewFoto(binding: DialogAgregarGastoBinding, uri: String?, onBorrar: () -> Unit) {
+
+        // 1. CONFIGURACIÓN DEL CLICK (SIEMPRE ACTIVA)
+        // Definimos qué hace el botón X, independientemente de si está visible o no ahora mismo.
+        binding.btnBorrarFoto.setOnClickListener {
+            onBorrar() // 1. Avisamos al Main para que limpie la variable
+
+            // 2. Reseteamos la UI del diálogo visualmente
+            binding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera) // Icono por defecto
+            binding.ivPreviewFoto.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            binding.ivPreviewFoto.clearColorFilter()
+
+            // Calculamos padding (si tienes el dimen definido úsalo, si no, usa 20dp a ojo)
+            // val padding = context.resources.getDimensionPixelSize(R.dimen.preview_padding_small)
+            val padding = 20 // Valor seguro por si no tienes el dimens.xml a mano
+            binding.ivPreviewFoto.setPadding(padding, padding, padding, padding)
+
+            binding.ivPreviewFoto.setColorFilter(Color.parseColor("#888888"))
+            binding.ivPreviewFoto.setOnClickListener(null) // Quitamos el zoom
+
+            binding.btnBorrarFoto.visibility = View.GONE // Ocultamos la X
+        }
+
+        // 2. ESTADO INICIAL VISUAL
         if (uri != null) {
+            // Si hay foto inicial (Editar), la cargamos
             Glide.with(context).load(uri).centerCrop().into(binding.ivPreviewFoto)
             binding.ivPreviewFoto.setPadding(0, 0, 0, 0)
             binding.ivPreviewFoto.clearColorFilter()
             binding.btnBorrarFoto.visibility = View.VISIBLE
             binding.ivPreviewFoto.setOnClickListener { onImageClick?.invoke(uri) }
-
-            binding.btnBorrarFoto.setOnClickListener {
-                onBorrar()
-                binding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera)
-                binding.ivPreviewFoto.scaleType = ImageView.ScaleType.CENTER_INSIDE
-                val padding = context.resources.getDimensionPixelSize(R.dimen.preview_padding_small)
-                binding.ivPreviewFoto.setPadding(padding, padding, padding, padding)
-                binding.ivPreviewFoto.setColorFilter(Color.parseColor("#888888"))
-                binding.ivPreviewFoto.setOnClickListener(null)
-                binding.btnBorrarFoto.visibility = View.GONE
-            }
         } else {
+            // Si no hay foto inicial (Crear), ocultamos la X
             binding.btnBorrarFoto.visibility = View.GONE
         }
     }

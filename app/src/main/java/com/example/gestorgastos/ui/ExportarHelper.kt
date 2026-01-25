@@ -18,10 +18,12 @@ import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.ItemGastoBinding
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 object ExportarHelper {
 
@@ -249,5 +251,56 @@ object ExportarHelper {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, "Compartir con..."))
+    }
+
+    fun copiarImagenAInternalStorage(context: Context, uriExterna: Uri): String? {
+        return try {
+            val inputStream: InputStream? = context.contentResolver.openInputStream(uriExterna)
+            val fileName = "img_${UUID.randomUUID()}.jpg"
+            val file = File(context.filesDir, fileName)
+            val outputStream = FileOutputStream(file)
+
+            inputStream?.copyTo(outputStream)
+            inputStream?.close()
+            outputStream.close()
+
+            // Devolvemos la URI en formato String para guardarla en la BD
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file).toString()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    fun guardarArchivoEnDescargas(context: Context, archivoOrigen: File, mimeType: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, archivoOrigen.name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/GestorGastos")
+                }
+                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        archivoOrigen.inputStream().use { input -> input.copyTo(output) }
+                    }
+                    Toast.makeText(context, "Guardado en Descargas/GestorGastos", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val carpetaApp = File(downloadsDir, "GestorGastos")
+                if (!carpetaApp.exists()) carpetaApp.mkdirs()
+                val archivoDestino = File(carpetaApp, archivoOrigen.name)
+                archivoOrigen.copyTo(archivoDestino, overwrite = true)
+
+                // Escanear para que aparezca en PC
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(archivoDestino.absolutePath), arrayOf(mimeType), null)
+                Toast.makeText(context, "Guardado en Descargas/GestorGastos", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Error al guardar: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 }
