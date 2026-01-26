@@ -186,7 +186,17 @@ class MainActivity : AppCompatActivity() {
         viewModel.mesActual.observe(this) {
             if (!viewModel.estaBuscando()) gestionarTitulo(viewModel.gastosVisibles.value?.size ?: 0)
         }
-        viewModel.notificarCambioLimites.observe(this) { adapterLista.notifyDataSetChanged() }
+        viewModel.notificarCambioLimites.observe(this) {
+            // 1. Recalcular datos actuales con los nuevos límites
+            val lista = viewModel.gastosVisibles.value ?: emptyList()
+            val total = lista.sumOf { it.cantidad }
+            // 2. Actualizar la UI estática (Lista, Gráfica y Color de fondo fijo)
+            adapterLista.notifyDataSetChanged()
+            binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, viewModel.obtenerColorAlerta(total)))
+            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
+            // 3. Ejecutar el Flash para dar feedback inmediato
+            uiManager.ejecutarEfectoSemaforo(totalActual = total, gastoNuevo = 0.0, limAmarillo = viewModel.limiteAmarillo, limRojo = viewModel.limiteRojo)
+        }
         viewModel.listaCategorias.observe(this) { lista ->
             val mapa = lista.associate { it.nombre to it.uriFoto }
             adapterLista.mapaCategorias = mapa
@@ -329,8 +339,14 @@ class MainActivity : AppCompatActivity() {
         val cats = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
         uriFotoFinal = null
         val d = dialogManager.mostrarAgregarGasto(cats, null,
-            onGuardar = { n, c, de, ca -> viewModel.agregarGasto(n, c, de, uriFotoFinal, ca) },
-            onBorrarFoto = { borrarFotoDelDialogo() })
+            onGuardar = { n, c, de, ca ->
+                // 1. Guardamos el gasto
+                viewModel.agregarGasto(n, c, de, uriFotoFinal, ca)
+                // 2. ACTIVAR SEMÁFORO
+                uiManager.ejecutarEfectoSemaforo(totalActual = viewModel.gastosVisibles.value?.sumOf { it.cantidad } ?: 0.0, gastoNuevo = c, limAmarillo = viewModel.limiteAmarillo, limRojo = viewModel.limiteRojo)
+            },
+            onBorrarFoto = { borrarFotoDelDialogo() }
+        )
         ivPreviewActual = d.findViewById(R.id.ivPreviewFoto)
     }
 

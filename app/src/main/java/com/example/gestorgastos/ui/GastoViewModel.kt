@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
 import java.time.YearMonth
 import java.time.ZoneId
 import com.example.gestorgastos.data.ModoFiltroFecha
+import kotlinx.coroutines.withContext
+
 class GastoViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -162,7 +164,39 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun borrarCategoria(categoria: Categoria) { viewModelScope.launch(Dispatchers.IO) { dao.borrarCategoria(categoria) } }
+
+    fun borrarCategoria(categoria: Categoria) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // 1. Seguridad: Nos aseguramos de que la categoría destino "Otros" exista
+            val catOtros = dao.obtenerCategoriaPorNombre("Otros")
+            if (catOtros == null) {
+                dao.insertarCategoria(Categoria("Otros", null))
+            }
+            // 2. Ejecutamos el borrado
+            // Nunca permitimos borrar la categoría "Otros"
+            if (categoria.nombre != "Otros") {
+                // --- LIMPIEZA DE ARCHIVOS (NUEVO) ---
+                // Si uriFoto NO es nulo, significa que es una foto TUYA guardada en el móvil.
+                // Si es nulo (icono predeterminado), no entra aquí y no borra nada.
+                if (!categoria.uriFoto.isNullOrEmpty()) {
+                    try {
+                        val uri = android.net.Uri.parse(categoria.uriFoto)
+                        val path = uri.path
+                        if (path != null) {
+                            val file = java.io.File(path)
+                            if (file.exists()) {
+                                file.delete() // ¡Borrado físico para ahorrar espacio!
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace() // Si falla el borrado del archivo, no rompemos la app
+                    }
+                }
+                // 3. Operación en Base de Datos (Mover gastos -> Borrar registro)
+                dao.eliminarCategoriaDeFormaSegura(categoria)
+            }
+        }
+    }
 
     fun obtenerGastosPorCategoria(lista: List<Gasto>): Map<String, Double> {
         return lista.groupBy { it.categoria }.mapValues { entry -> entry.value.sumOf { it.cantidad } }
@@ -178,6 +212,15 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
     fun restaurarGastos(lista: List<Gasto>) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.insertarListaGastos(lista)
+        }
+    }
+
+    fun contarGastosDeCategoria(nombre: String, alTerminar: (Int) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val cantidad = dao.contarGastosPorCategoria(nombre)
+            withContext(Dispatchers.Main) {
+                alTerminar(cantidad)
+            }
         }
     }
 }

@@ -194,12 +194,20 @@ class CategoriasActivity : AppCompatActivity() {
     }
 
     private fun confirmarBorrado(categoria: Categoria) {
-        AlertDialog.Builder(this)
-            .setTitle("¿Borrar ${categoria.nombre}?")
-            .setMessage("Los gastos de esta categoría perderán su icono.")
-            .setPositiveButton("Borrar") { _, _ -> viewModel.borrarCategoria(categoria) }
-            .setNegativeButton("Cancelar", null)
-            .show()
+        // 1. Consultamos al ViewModel (usando la función que creamos antes)
+        viewModel.contarGastosDeCategoria(categoria.nombre) { cantidad ->
+            // 2. Preparamos el mensaje según el resultado
+            val mensaje = if (cantidad > 0) { "Se cambiarán a categoría 'Otros' los $cantidad gastos que ahora tienen esta categoría." } else { "No hay gastos asociados a esta categoría." }
+            // 3. Mostramos el diálogo con el dato real
+            AlertDialog.Builder(this)
+                .setTitle("¿Borrar '${categoria.nombre}'?")
+                .setMessage(mensaje)
+                .setPositiveButton("Borrar") { _, _ ->
+                    viewModel.borrarCategoria(categoria)
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
     }
 
     private fun checkCameraPermissionAndOpen() {

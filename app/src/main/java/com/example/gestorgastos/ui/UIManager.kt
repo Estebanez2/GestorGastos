@@ -4,7 +4,7 @@ import android.view.View
 import com.example.gestorgastos.MainActivity
 import com.example.gestorgastos.databinding.ActivityMainBinding
 import com.github.mikephil.charting.animation.Easing
-
+import com.example.gestorgastos.R
 class UIManager(private val binding: ActivityMainBinding) {
 
     fun cambiarVista(vista: MainActivity.Vista, hayDatos: Boolean) {
@@ -55,5 +55,15 @@ class UIManager(private val binding: ActivityMainBinding) {
 
     fun estaBarraSeleccionVisible(): Boolean {
         return binding.layoutBarraSeleccion.visibility == View.VISIBLE
+    }
+
+    fun ejecutarEfectoSemaforo(totalActual: Double, gastoNuevo: Double, limAmarillo: Double, limRojo: Double) {
+        val nuevoTotal = totalActual + gastoNuevo
+        val colorResId = when {
+            nuevoTotal > limRojo -> R.color.alerta_rojo
+            nuevoTotal > limAmarillo -> R.color.alerta_amarillo
+            else -> R.color.alerta_verde
+        }
+        binding.viewFlashBorde.flashEffect(colorResId)
     }
 }

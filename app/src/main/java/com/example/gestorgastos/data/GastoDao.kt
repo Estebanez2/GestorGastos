@@ -43,7 +43,7 @@ interface GastoDao {
     suspend fun borrarListaGastos(gastos: List<Gasto>)
 
     @Query("SELECT * FROM tabla_categorias ORDER BY nombre ASC")
-    fun obtenerCategorias(): kotlinx.coroutines.flow.Flow<List<Categoria>>
+    fun obtenerCategorias(): Flow<List<Categoria>>
 
     // Actualiza el nombre de la categoría en todos los gastos que la tengan
     @Query("UPDATE tabla_gastos SET categoria = :nuevoNombre WHERE categoria = :viejoNombre")
@@ -113,4 +113,20 @@ interface GastoDao {
 
     @Update
     suspend fun actualizarCategoria(categoria: Categoria)
+
+    // 1. Mover los gastos huérfanos a "Otros"
+    @Query("UPDATE tabla_gastos SET categoria = 'Otros' WHERE categoria = :categoriaBorrada")
+    suspend fun moverGastosAOtros(categoriaBorrada: String)
+
+    // 2. Transacción segura: Primero mueve los gastos, luego borra la categoría
+    @androidx.room.Transaction
+    suspend fun eliminarCategoriaDeFormaSegura(categoria: Categoria) {
+        // Paso A: Salvamos los gastos moviéndolos a 'Otros'
+        moverGastosAOtros(categoria.nombre)
+        // Paso B: Ahora sí, borramos la categoría tranquilamente
+        borrarCategoria(categoria)
+    }
+
+    @Query("SELECT COUNT(*) FROM tabla_gastos WHERE categoria = :nombreCategoria")
+    suspend fun contarGastosPorCategoria(nombreCategoria: String): Int
 }
