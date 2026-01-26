@@ -140,10 +140,16 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
     // Categorías
     fun inicializarCategoriasPorDefecto() {
         viewModelScope.launch(Dispatchers.IO) {
-            dao.insertarCategoria(Categoria("Comida", null))
-            dao.insertarCategoria(Categoria("Transporte", null))
-            dao.insertarCategoria(Categoria("Casa", null))
-            dao.insertarCategoria(Categoria("Otros", null))
+            val categoriasBasicas = listOf("Comida", "Transporte", "Casa", "Otros")
+            for (nombre in categoriasBasicas) {
+                // ANTES DE INSERTAR, VERIFICAMOS SI YA EXISTE
+                val existe = dao.obtenerCategoriaPorNombre(nombre)
+                if (existe == null) {
+                    // Solo si NO existe, la creamos vacía (sin foto)
+                    dao.insertarCategoria(Categoria(nombre, null))
+                }
+                // Si ya existe (aunque tenga foto personalizada), NO HACEMOS NADA.
+            }
         }
     }
     fun agregarNuevaCategoria(nombre: String, uriFoto: String?) { viewModelScope.launch(Dispatchers.IO) { dao.insertarCategoria(Categoria(nombre, uriFoto)) } }

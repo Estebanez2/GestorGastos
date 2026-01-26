@@ -2,7 +2,6 @@ package com.example.gestorgastos
 
 import android.Manifest
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
@@ -16,8 +15,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.LinearLayoutManager
 import com.bumptech.glide.Glide
 import com.example.gestorgastos.data.FiltroBusqueda
 import com.example.gestorgastos.data.Gasto
@@ -43,11 +40,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dataTransferManager: DataTransferManager
     private lateinit var conflictosManager: ConflictosManager
     private lateinit var catConflictosManager: CategoriaConflictosManager
-    private lateinit var uiManager: UIManager // Nuevo
+    private lateinit var uiManager: UIManager
+    private lateinit var viewConfigurator: MainViewConfigurator // ¡NUEVO!
 
-    // --- ADAPTERS ---
-    private lateinit var adapterLista: GastoAdapter
-    private lateinit var adapterGastosCategoria: GastoAdapter
+    // --- ACCESO A ADAPTERS (Delegado al configurador) ---
+    private val adapterLista get() = viewConfigurator.adapterLista
+    private val adapterGastosCategoria get() = viewConfigurator.adapterGastosCategoria
     private var adapterCalendario: CalendarioAdapter? = null
 
     // --- ESTADO UI ---
@@ -55,7 +53,7 @@ class MainActivity : AppCompatActivity() {
     private var vistaActual = Vista.LISTA
     private var categoriaSeleccionada: String? = null
 
-    // Variables para la cámara (Necesarias aquí)
+    // Variables Foto
     private var uriFotoTemporal: Uri? = null
     private var uriFotoFinal: String? = null
     private var ivPreviewActual: ImageView? = null
@@ -88,13 +86,32 @@ class MainActivity : AppCompatActivity() {
         viewModel = ViewModelProvider(this)[GastoViewModel::class.java]
 
         inicializarManagers()
-        setupVistas()
+
+        // Configuración delegada de Vistas y Swipe
+        viewConfigurator.setupRecyclerViews(
+            onEditGasto = { mostrarDialogoEditarGasto(it) },
+            onSelectionChanged = { cantidad -> uiManager.gestionarBarraSeleccion(cantidad, binding.fabAgregar) },
+            onSwipeDelete = { gasto, adapter, pos ->
+                if (!uiManager.estaBarraSeleccionVisible()) {
+                    mostrarDialogoConfirmacionBorrado(gasto, adapter, pos)
+                } else {
+                    adapter.notifyItemChanged(pos) // Restaurar si estaba bloqueado
+                }
+            }
+        )
+
+        // Gráficas
+        chartManager.setupBarChart()
+        chartManager.setupPieChart()
+
         setupBotones()
         setupObservers()
     }
 
     private fun inicializarManagers() {
         uiManager = UIManager(binding)
+        viewConfigurator = MainViewConfigurator(binding, this, uiManager)
+
         chartManager = ChartManager(this, binding.chartGastos, binding.chartCategorias) { categoria ->
             categoriaSeleccionada = categoria
             filtrarListaCategorias()
@@ -110,36 +127,6 @@ class MainActivity : AppCompatActivity() {
         dataTransferManager = DataTransferManager(this)
         conflictosManager = ConflictosManager(this)
         catConflictosManager = CategoriaConflictosManager(this)
-    }
-
-    private fun setupVistas() {
-        // Lista Principal
-        adapterLista = GastoAdapter { mostrarDialogoEditarGasto(it) }
-        adapterLista.onSelectionChanged = { cantidad ->
-            uiManager.gestionarBarraSeleccion(cantidad, binding.fabAgregar)
-        }
-
-        binding.rvGastos.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = adapterLista
-            setupSwipeToDelete { pos ->
-                if (!uiManager.estaBarraSeleccionVisible()) {
-                    mostrarDialogoConfirmacionBorrado(adapterLista.currentList[pos], adapterLista, pos)
-                } else {
-                    adapterLista.notifyItemChanged(pos) // Bloqueado si seleccionando
-                }
-            }
-        }
-
-        // Lista Categorías y Calendario
-        adapterGastosCategoria = GastoAdapter { mostrarDialogoEditarGasto(it) }
-        binding.rvGastosCategoria.layoutManager = LinearLayoutManager(this)
-        binding.rvGastosCategoria.adapter = adapterGastosCategoria
-
-        binding.rvCalendario.layoutManager = GridLayoutManager(this, 7)
-
-        chartManager.setupBarChart()
-        chartManager.setupPieChart()
     }
 
     private fun setupBotones() {
@@ -158,7 +145,6 @@ class MainActivity : AppCompatActivity() {
                     ExportManager.Accion.IMAGEN_VISTA -> manejarExportacionImagen()
                     ExportManager.Accion.IMPORTAR_DATOS -> importFileLauncher.launch("*/*")
                     ExportManager.Accion.EXPORTAR_DATOS -> {
-                        // Delegamos el flujo complejo al ExportManager
                         exportManager.iniciarProcesoExportacion(viewModel.mesActual.value) { inicio, fin, formatoIndex ->
                             realizarBackup(inicio, fin, formatoIndex)
                         }
@@ -167,32 +153,28 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Navegación y Vistas
         binding.btnMesAnterior.setOnClickListener { viewModel.mesAnterior() }
         binding.btnMesSiguiente.setOnClickListener { viewModel.mesSiguiente() }
         binding.btnCategorias.setOnClickListener { startActivity(Intent(this, CategoriasActivity::class.java)) }
         binding.btnCambiarVista.setOnClickListener { mostrarMenuVistas(it) }
         binding.btnBuscar.setOnClickListener { if (viewModel.estaBuscando()) mostrarMenuFiltro(it) else abrirBuscador(null) }
 
-        // Multiselección
         binding.btnCerrarSeleccion.setOnClickListener { adapterLista.salirModoSeleccion() }
         binding.btnBorrarSeleccionados.setOnClickListener { procesarBorradoMultiple() }
     }
 
     private fun setupObservers() {
         viewModel.gastosVisibles.observe(this) { lista ->
-            // Actualizar Adaptadores
             adapterLista.submitList(lista)
             filtrarListaCategorias()
 
-            // Actualizar Calendario y Gráficas
             val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
             adapterCalendario = CalendarioAdapter(mes, lista)
             binding.rvCalendario.adapter = adapterCalendario
+
             chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
             chartManager.actualizarPieChart(lista, categoriaSeleccionada)
 
-            // Actualizar UI General (Totales y Títulos)
             val total = lista.sumOf { it.cantidad }
             binding.tvTotalMes.text = Formato.formatearMoneda(total)
             binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, viewModel.obtenerColorAlerta(total)))
@@ -204,9 +186,7 @@ class MainActivity : AppCompatActivity() {
         viewModel.mesActual.observe(this) {
             if (!viewModel.estaBuscando()) gestionarTitulo(viewModel.gastosVisibles.value?.size ?: 0)
         }
-
         viewModel.notificarCambioLimites.observe(this) { adapterLista.notifyDataSetChanged() }
-
         viewModel.listaCategorias.observe(this) { lista ->
             val mapa = lista.associate { it.nombre to it.uriFoto }
             adapterLista.mapaCategorias = mapa
@@ -216,11 +196,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- LÓGICA DE UI DELEGADA ---
-
     private fun gestionarTitulo(cantidadGastos: Int) {
         val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale("es", "ES"))
         var titulo = viewModel.mesActual.value?.format(formatter)?.replaceFirstChar { it.uppercase() } ?: ""
-
         if (viewModel.estaBuscando()) {
             val filtro = viewModel.filtroActualValue
             titulo = when (filtro?.modoFecha) {
@@ -232,9 +210,7 @@ class MainActivity : AppCompatActivity() {
         uiManager.actualizarTitulo(titulo, viewModel.estaBuscando())
     }
 
-    // --- FUNCIONALIDADES (Cámara, Exportar, Importar) ---
-
-    // CORRECCIÓN: Esta función faltaba y es necesaria para la cámara
+    // --- FUNCIONES AUXILIARES ---
     private fun abrirCamara() {
         try {
             val tempFile = File.createTempFile("foto_", ".jpg", externalCacheDir)
@@ -242,7 +218,6 @@ class MainActivity : AppCompatActivity() {
             takePictureLauncher.launch(uriFotoTemporal)
         } catch (e: Exception) { e.printStackTrace() }
     }
-
     private fun checkCameraPermissionAndOpen() {
         ejecutarConPermisoCamara(
             onGranted = { abrirCamara() },
@@ -250,15 +225,13 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // --- EXPORTAR / IMPORTAR ---
     private fun manejarExportacionImagen() {
         val lista = viewModel.gastosVisibles.value ?: emptyList()
         if (lista.isEmpty()) { Toast.makeText(this, "Nada que capturar", Toast.LENGTH_SHORT).show(); return }
-
         val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
-
         exportManager.procesarCapturaImagen(vistaActual, lista, vistas) { bitmap ->
             if (bitmap != null) {
-                // Aquí usamos el helper antiguo para imágenes, que funciona bien
                 AlertDialog.Builder(this).setTitle("Imagen lista").setItems(arrayOf("Guardar", "Compartir")) { _, i ->
                     if (i == 0) ExportarHelper.guardarEnDispositivo(this, bitmap, null, true)
                     else ExportarHelper.compartir(this, bitmap, null, true)
@@ -271,24 +244,17 @@ class MainActivity : AppCompatActivity() {
         val incluirFotos = formatoIndex == 0
         val soloCsv = formatoIndex == 2
         val mensaje = if (incluirFotos) "Generando ZIP..." else "Generando archivo..."
-
         val progress = AlertDialog.Builder(this).setMessage(mensaje).setCancelable(false).show()
-
         lifecycleScope.launch {
-            val archivo = if (soloCsv) dataTransferManager.exportarSoloCSV(inicio, fin)
-            else dataTransferManager.exportarDatos(incluirFotos, inicio, fin)
+            val archivo = if (soloCsv) dataTransferManager.exportarSoloCSV(inicio, fin) else dataTransferManager.exportarDatos(incluirFotos, inicio, fin)
             progress.dismiss()
-
             val mime = if (soloCsv) "text/csv" else if (incluirFotos) "application/zip" else "application/json"
-
-            // CORRECCIÓN: Usamos el helper nuevo para guardar en descargas
             exportManager.mostrarDialogoPostExportacion(archivo, mime) { file ->
                 ExportarHelper.guardarArchivoEnDescargas(this@MainActivity, file, mime)
             }
         }
     }
 
-    // --- IMPORTAR ---
     private fun mostrarDialogoModoImportacion(uri: Uri) {
         AlertDialog.Builder(this).setTitle("Importar").setMessage("¿Cómo quieres proceder?")
             .setPositiveButton("MEZCLAR") { _, _ -> confirmarImportacion(uri, false) }
@@ -298,22 +264,45 @@ class MainActivity : AppCompatActivity() {
             .setNeutralButton("Cancelar", null).show()
     }
 
+    // --- LÓGICA IMPORTACIÓN INTELIGENTE (FILTRADO DE CATEGORÍAS) ---
     private fun confirmarImportacion(uri: Uri, sustituir: Boolean) {
         val progress = AlertDialog.Builder(this).setMessage("Procesando...").setCancelable(false).show()
         lifecycleScope.launch {
-            val res = dataTransferManager.importarDatos(uri, sustituir)
+            val resultado = dataTransferManager.importarDatos(uri, sustituir)
             progress.dismiss()
-            if (res.exito) {
-                // Cadena de resolución de conflictos: Gastos -> Categorías -> Fin
-                if (res.conflictosGastos.isNotEmpty()) {
-                    conflictosManager.mostrarDialogoResolucion(res.conflictosGastos) { d, r, du ->
+            if (resultado.exito) {
+                // PASO 1: Resolver Conflictos de GASTOS
+                if (resultado.conflictosGastos.isNotEmpty()) {
+                    conflictosManager.mostrarDialogoResolucion(resultado.conflictosGastos) { descartar, reemplazar, duplicar ->
                         lifecycleScope.launch {
-                            dataTransferManager.resolverConflictos(d, r, du)
-                            procesarConflictosCategorias(res.conflictosCategorias, res.gastosInsertados)
+                            // A. Ejecutamos la acción en la BD
+                            dataTransferManager.resolverConflictos(descartar, reemplazar, duplicar)
+
+                            // B. FILTRADO INTELIGENTE DE CATEGORÍAS
+                            val categoriasAfectadas = mutableSetOf<String>()
+                            // 1. Gastos directos
+                            categoriasAfectadas.addAll(resultado.gastosInsertados.map { it.categoria })
+                            // 2. Gastos reemplazados
+                            categoriasAfectadas.addAll(reemplazar.map { it.nuevoImportado.categoria })
+                            // 3. Gastos duplicados
+                            categoriasAfectadas.addAll(duplicar.map { it.nuevoImportado.categoria })
+
+                            // C. Filtramos conflictos relevantes
+                            val conflictosRelevantes = resultado.conflictosCategorias.filter { conflicto ->
+                                categoriasAfectadas.contains(conflicto.categoriaNombre)
+                            }
+
+                            // D. Procesamos
+                            procesarConflictosCategorias(conflictosRelevantes, resultado.gastosInsertados.size + reemplazar.size + duplicar.size)
                         }
                     }
                 } else {
-                    procesarConflictosCategorias(res.conflictosCategorias, res.gastosInsertados)
+                    // Si no hubo conflictos de gastos, preguntamos por las categorías de los insertados
+                    val categoriasAfectadas = resultado.gastosInsertados.map { it.categoria }.toSet()
+                    val conflictosRelevantes = resultado.conflictosCategorias.filter {
+                        categoriasAfectadas.contains(it.categoriaNombre)
+                    }
+                    procesarConflictosCategorias(conflictosRelevantes, resultado.gastosInsertados.size)
                 }
             } else {
                 Toast.makeText(this@MainActivity, "Error al importar", Toast.LENGTH_LONG).show()
@@ -335,7 +324,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // --- DIÁLOGOS WRAPPERS (Para mantener el código corto) ---
+    // --- DIÁLOGOS WRAPPERS ---
     private fun mostrarDialogoAgregarGasto() {
         val cats = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
         uriFotoFinal = null
@@ -391,7 +380,6 @@ class MainActivity : AppCompatActivity() {
                     R.id.menu_vista_categorias -> Vista.QUESITOS
                     else -> Vista.LISTA
                 }
-                // Forzar refresco
                 viewModel.gastosVisibles.value?.let { lista -> uiManager.cambiarVista(vistaActual, lista.isNotEmpty()) }
                 true
             }
@@ -412,7 +400,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Helper para listas
     private fun filtrarListaCategorias() {
         val todos = viewModel.gastosVisibles.value ?: emptyList()
         adapterGastosCategoria.submitList(if (categoriaSeleccionada != null) todos.filter { it.categoria == categoriaSeleccionada } else emptyList())
@@ -423,25 +410,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun actualizarVistaFotoDialogo() {
-        // ivPreviewActual es una variable que guardamos cuando abrimos el diálogo
         ivPreviewActual?.let { iv ->
-            // Cargamos la imagen seleccionada (uriFotoFinal)
             Glide.with(this).load(uriFotoFinal).centerCrop().into(iv)
-            // Quitamos el tinte negro por si era un icono
             iv.clearColorFilter()
-            // Habilitamos el zoom al pulsar la miniatura
             iv.setOnClickListener { ImageZoomHelper.mostrarImagen(this, uriFotoFinal) }
-            // Mostramos el botón de borrar foto (la X roja pequeña)
             (iv.parent as? View)?.findViewById<View>(R.id.btnBorrarFoto)?.visibility = View.VISIBLE
         }
     }
 
     private fun borrarFotoDelDialogo() {
-        // 1. Borramos la variable de datos
         uriFotoFinal = null
-        // 2. Actualizamos la UI (importante)
-        ivPreviewActual?.let { iv -> iv.setImageDrawable(null) // Quitamos la imagen
-            // Ocultamos el botón de borrar (X)
+        ivPreviewActual?.let { iv -> iv.setImageDrawable(null)
             (iv.parent as? View)?.findViewById<View>(R.id.btnBorrarFoto)?.visibility = View.GONE }
         Toast.makeText(this, "Foto eliminada", Toast.LENGTH_SHORT).show()
     }

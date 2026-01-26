@@ -39,7 +39,7 @@ class DataTransferManager(private val context: Context) {
 
     data class ResultadoImportacion(
         val exito: Boolean,
-        val gastosInsertados: Int = 0,
+        val gastosInsertados: List<Gasto> = emptyList(),
         val conflictosGastos: List<ConflictoGasto> = emptyList(),
         val conflictosCategorias: List<ConflictoCategoria> = emptyList()
     )
@@ -218,28 +218,41 @@ class DataTransferManager(private val context: Context) {
                 dao.borrarTodosLosGastos()
             }
 
-            // 2. PROCESAR CATEGORÍAS
+            // 2. PROCESAR CATEGORÍAS (CONTROL TOTAL - Hash Universal)
             val categoriasFinales = mutableListOf<Categoria>()
             val conflictosCategorias = mutableListOf<ConflictoCategoria>()
 
             for (catImportada in backupData.categorias) {
                 val catExistente = dao.obtenerCategoriaPorNombre(catImportada.nombre)
+
+                // Intentamos recuperar la foto nueva (si existe en el ZIP)
                 val uriImportada = recuperarUriFoto(catImportada.uriFoto, mapaFotosNuevas)
 
                 if (catExistente != null) {
-                    // La categoría existe. ¿Tiene foto importada?
-                    if (uriImportada != null) {
-                        // REGLA: Si trae foto nueva, PREGUNTAMOS SIEMPRE (incluso si la local ya tiene foto o es icono)
+                    // Calculamos el "ADN" de las imágenes.
+                    // Si no tiene foto (es predeterminada), el hash será NULL.
+                    val hashLocal = calcularHashImagen(context, catExistente.uriFoto)
+                    val hashImportado = calcularHashImagen(context, uriImportada)
+
+                    // COMPARACIÓN SIMPLE: ¿Son visualmente distintas?
+                    // Esto detecta:
+                    // 1. Tienes Foto vs Viene Icono (Hash vs Null) -> DIFERENTE
+                    // 2. Tienes Icono vs Viene Foto (Null vs Hash) -> DIFERENTE
+                    // 3. Foto A vs Foto B (Hash A vs Hash B) -> DIFERENTE
+
+                    if (hashLocal != hashImportado) {
                         conflictosCategorias.add(ConflictoCategoria(
                             categoriaNombre = catExistente.nombre,
                             uriActual = catExistente.uriFoto,
-                            uriNueva = uriImportada
+                            uriNueva = uriImportada // Si es null, el diálogo mostrará el icono a la derecha
                         ))
                     }
-                    // Mientras decidimos, mantenemos la actual en la lista para que no falle la FK de los gastos
+
+                    // Mantenemos la actual de momento. Si en el diálogo eliges cambiar, se actualizará.
                     categoriasFinales.add(catExistente)
+
                 } else {
-                    // No existe, la creamos tal cual viene
+                    // La categoría no existe, la creamos nueva
                     categoriasFinales.add(catImportada.copy(uriFoto = uriImportada))
                 }
             }
@@ -269,7 +282,7 @@ class DataTransferManager(private val context: Context) {
                 dao.insertarListaGastos(gastosParaInsertar)
             }
 
-            return@withContext ResultadoImportacion(true, gastosParaInsertar.size, listaConflictos, conflictosCategorias)
+            return@withContext ResultadoImportacion(true, gastosParaInsertar, listaConflictos, conflictosCategorias)
         } catch (e: Exception) {
             e.printStackTrace()
             return@withContext ResultadoImportacion(false)
@@ -442,6 +455,27 @@ class DataTransferManager(private val context: Context) {
         val cat = dao.obtenerCategoriaPorNombre(nombreCategoria)
         if (cat != null) {
             dao.actualizarCategoria(cat.copy(uriFoto = nuevaUri))
+        }
+    }
+
+    // --- CALCULAR HASH PARA COMPARAR IMÁGENES ---
+    private fun calcularHashImagen(context: Context, uriString: String?): String? {
+        if (uriString.isNullOrEmpty()) return null
+        return try {
+            val uri = Uri.parse(uriString)
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val digest = java.security.MessageDigest.getInstance("MD5")
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (inputStream!!.read(buffer).also { bytesRead = it } != -1) {
+                digest.update(buffer, 0, bytesRead)
+            }
+            inputStream.close()
+            // Convertir bytes a Hexadecimal
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null // Si falla (archivo no existe, etc), devolvemos null
         }
     }
 }
