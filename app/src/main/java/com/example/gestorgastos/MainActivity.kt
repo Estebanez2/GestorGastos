@@ -25,6 +25,8 @@ import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -52,6 +54,8 @@ class MainActivity : AppCompatActivity() {
     enum class Vista { LISTA, CALENDARIO, GRAFICA, QUESITOS }
     private var vistaActual = Vista.LISTA
     private var categoriaSeleccionada: String? = null
+    private var diaGraficaSeleccionado: Int? = null
+    private var fechaCalendarioSeleccionada: java.time.LocalDate? = null
 
     // Variables Foto
     private var uriFotoTemporal: Uri? = null
@@ -82,7 +86,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
+        // --- RECUPERAR VISTA GUARDADA ---
+        val prefs = getSharedPreferences("AppConfig", MODE_PRIVATE)
+        val vistaGuardadaIndex = prefs.getInt("ULTIMA_VISTA", Vista.LISTA.ordinal)
+        // Recuperamos la vista o usamos LISTA si falla algo
+        vistaActual = Vista.values().getOrElse(vistaGuardadaIndex) { Vista.LISTA }
         viewModel = ViewModelProvider(this)[GastoViewModel::class.java]
 
         inicializarManagers()
@@ -112,11 +120,28 @@ class MainActivity : AppCompatActivity() {
         uiManager = UIManager(binding)
         viewConfigurator = MainViewConfigurator(binding, this, uiManager)
 
-        chartManager = ChartManager(this, binding.chartGastos, binding.chartCategorias) { categoria ->
-            categoriaSeleccionada = categoria
-            filtrarListaCategorias()
-            binding.tvTituloCategoriaSeleccionada.text = categoria?.let { "Detalles: $it" } ?: "Toca para ver detalles"
-        }
+        chartManager = ChartManager(this, binding.chartGastos, binding.chartCategorias,
+            onCategorySelected = { categoria ->
+                categoriaSeleccionada = categoria
+                filtrarListaCategorias()
+                binding.tvTituloCategoriaSeleccionada.text = categoria?.let { "Detalles: $it" } ?: "Toca para ver detalles"
+            },
+            onBarSelected = { dia ->
+                diaGraficaSeleccionado = dia
+                val listaTotal = viewModel.gastosVisibles.value ?: emptyList()
+                if (dia != null) {
+                    val filtrados = listaTotal.filter {
+                        val fecha = Instant.ofEpochMilli(it.fecha).atZone(ZoneId.systemDefault())
+                        fecha.dayOfMonth == dia
+                    }
+                    viewConfigurator.adapterGastosGrafica.submitList(filtrados)
+                    binding.tvTituloDetalleGrafica.text = "Gastos del día $dia"
+                } else {
+                    viewConfigurator.adapterGastosGrafica.submitList(emptyList())
+                    binding.tvTituloDetalleGrafica.text = "Toca una barra para ver detalles"
+                }
+            }
+        )
         dialogManager = DialogManager(this).apply {
             onCameraRequested = { checkCameraPermissionAndOpen() }
             onGalleryRequested = { pickGalleryLauncher.launch("image/*") }
@@ -159,28 +184,56 @@ class MainActivity : AppCompatActivity() {
         binding.btnCambiarVista.setOnClickListener { mostrarMenuVistas(it) }
         binding.btnBuscar.setOnClickListener { if (viewModel.estaBuscando()) mostrarMenuFiltro(it) else abrirBuscador(null) }
 
-        binding.btnCerrarSeleccion.setOnClickListener { adapterLista.salirModoSeleccion() }
+        binding.btnCerrarSeleccion.setOnClickListener { obtenerAdapterActivo().salirModoSeleccion() }
         binding.btnBorrarSeleccionados.setOnClickListener { procesarBorradoMultiple() }
     }
 
     private fun setupObservers() {
         viewModel.gastosVisibles.observe(this) { lista ->
-            adapterLista.submitList(lista)
-            filtrarListaCategorias()
-
-            val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
-            adapterCalendario = CalendarioAdapter(mes, lista)
-            binding.rvCalendario.adapter = adapterCalendario
-
-            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
-            chartManager.actualizarPieChart(lista, categoriaSeleccionada)
+            // 1. Actualizaciones generales (Lista principal, totales, colores...)
+            viewConfigurator.adapterLista.submitList(lista)
+            filtrarListaCategorias() // Mantiene filtro de quesitos
 
             val total = lista.sumOf { it.cantidad }
             binding.tvTotalMes.text = Formato.formatearMoneda(total)
             binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, viewModel.obtenerColorAlerta(total)))
-
-            gestionarTitulo(lista.size)
             uiManager.cambiarVista(vistaActual, lista.isNotEmpty())
+            gestionarTitulo(lista.size)
+            // 2. Actualizar GRÁFICA y CALENDARIO (Visual)
+            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
+            chartManager.actualizarPieChart(lista, categoriaSeleccionada)
+            val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
+            adapterCalendario = CalendarioAdapter(mes, lista) { fecha ->
+                fechaCalendarioSeleccionada = fecha
+                val filtrados = lista.filter {
+                    val f = java.time.Instant.ofEpochMilli(it.fecha).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    f == fecha
+                }
+                viewConfigurator.adapterGastosCalendario.submitList(filtrados)
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy")
+                binding.tvTituloDetalleCalendario.text = "Gastos del ${fecha.format(formatter)}"
+            }
+            binding.rvCalendario.adapter = adapterCalendario
+            if (fechaCalendarioSeleccionada != null) {
+                val filtrados = lista.filter {
+                    val f = java.time.Instant.ofEpochMilli(it.fecha).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    f == fechaCalendarioSeleccionada
+                }
+                viewConfigurator.adapterGastosCalendario.submitList(filtrados)
+            } else {
+                viewConfigurator.adapterGastosCalendario.submitList(emptyList())
+                binding.tvTituloDetalleCalendario.text = "Toca un día para ver detalles"
+            }
+            if (diaGraficaSeleccionado != null) {
+                val filtrados = lista.filter {
+                    val f = java.time.Instant.ofEpochMilli(it.fecha).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    f.dayOfMonth == diaGraficaSeleccionado
+                }
+                viewConfigurator.adapterGastosGrafica.submitList(filtrados)
+            } else {
+                viewConfigurator.adapterGastosGrafica.submitList(emptyList())
+                binding.tvTituloDetalleGrafica.text = "Toca una barra para ver detalles"
+            }
         }
 
         viewModel.mesActual.observe(this) {
@@ -199,9 +252,19 @@ class MainActivity : AppCompatActivity() {
         }
         viewModel.listaCategorias.observe(this) { lista ->
             val mapa = lista.associate { it.nombre to it.uriFoto }
-            adapterLista.mapaCategorias = mapa
-            adapterGastosCategoria.mapaCategorias = mapa
-            adapterLista.notifyDataSetChanged()
+            // Pasamos el mapa a TODOS los adaptadores
+            viewConfigurator.adapterLista.mapaCategorias = mapa
+            viewConfigurator.adapterGastosCategoria.mapaCategorias = mapa
+
+            // --- NUEVO: ARREGLO DE FOTOS EN CALENDARIO Y GRÁFICA ---
+            viewConfigurator.adapterGastosCalendario.mapaCategorias = mapa
+            viewConfigurator.adapterGastosGrafica.mapaCategorias = mapa
+
+            // Notificamos cambios para que se repinten las fotos al instante
+            viewConfigurator.adapterLista.notifyDataSetChanged()
+            viewConfigurator.adapterGastosCategoria.notifyDataSetChanged()
+            viewConfigurator.adapterGastosCalendario.notifyDataSetChanged()
+            viewConfigurator.adapterGastosGrafica.notifyDataSetChanged()
         }
     }
 
@@ -353,9 +416,17 @@ class MainActivity : AppCompatActivity() {
     private fun mostrarDialogoEditarGasto(g: Gasto) {
         val cats = viewModel.listaCategorias.value?.map { it.nombre } ?: emptyList()
         uriFotoFinal = g.uriFoto
+        val cantidadOriginal = g.cantidad
         val d = dialogManager.mostrarEditarGasto(g, cats, uriFotoFinal,
-            onActualizar = { viewModel.actualizarGasto(it.copy(uriFoto = uriFotoFinal)) },
-            onBorrarFoto = { borrarFotoDelDialogo() })
+            onActualizar = { gastoEditado ->
+                viewModel.actualizarGasto(gastoEditado.copy(uriFoto = uriFotoFinal))
+                if (gastoEditado.cantidad != cantidadOriginal) {
+                    val diferencia = gastoEditado.cantidad - cantidadOriginal
+                    uiManager.ejecutarEfectoSemaforo(totalActual = viewModel.gastosVisibles.value?.sumOf { it.cantidad } ?: 0.0, gastoNuevo = diferencia, limAmarillo = viewModel.limiteAmarillo, limRojo = viewModel.limiteRojo)
+                }
+            },
+            onBorrarFoto = { borrarFotoDelDialogo() }
+        )
         ivPreviewActual = d.findViewById(R.id.ivPreviewFoto)
     }
 
@@ -371,16 +442,29 @@ class MainActivity : AppCompatActivity() {
             onCancelar = { adapter.notifyItemChanged(pos) })
     }
 
+    // Función auxiliar para saber qué adaptador manda ahora mismo
+    private fun obtenerAdapterActivo(): GastoAdapter {
+        return when (vistaActual) {
+            Vista.LISTA -> viewConfigurator.adapterLista
+            Vista.QUESITOS -> viewConfigurator.adapterGastosCategoria
+            Vista.CALENDARIO -> viewConfigurator.adapterGastosCalendario
+            Vista.GRAFICA -> viewConfigurator.adapterGastosGrafica
+        }
+    }
+
     private fun procesarBorradoMultiple() {
-        val seleccionados = adapterLista.obtenerGastosSeleccionados()
+        val adapter = obtenerAdapterActivo()
+        val seleccionados = adapter.obtenerGastosSeleccionados()
         if (seleccionados.isEmpty()) return
+
         AlertDialog.Builder(this).setTitle("Borrar ${seleccionados.size} gastos?")
             .setPositiveButton("Borrar") { _, _ ->
                 val backup = seleccionados.toList()
                 viewModel.borrarGastosSeleccionados(seleccionados)
-                adapterLista.salirModoSeleccion()
+                adapter.salirModoSeleccion() // Salimos del modo selección del adaptador activo
+
                 var deshecho = false
-                Snackbar.make(binding.root, "Eliminados", 5000).setAction("DESHACER") {
+                Snackbar.make(binding.root, "Eliminados ${seleccionados.size} gastos", 5000).setAction("DESHACER") {
                     if (!deshecho) { deshecho = true; viewModel.restaurarGastos(backup) }
                 }.show()
             }.setNegativeButton("Cancelar", null).show()
@@ -396,6 +480,7 @@ class MainActivity : AppCompatActivity() {
                     R.id.menu_vista_categorias -> Vista.QUESITOS
                     else -> Vista.LISTA
                 }
+                getSharedPreferences("AppConfig", MODE_PRIVATE).edit().putInt("ULTIMA_VISTA", vistaActual.ordinal).apply()
                 viewModel.gastosVisibles.value?.let { lista -> uiManager.cambiarVista(vistaActual, lista.isNotEmpty()) }
                 true
             }
@@ -422,7 +507,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        if (uiManager.estaBarraSeleccionVisible()) adapterLista.salirModoSeleccion() else super.onBackPressed()
+        if (uiManager.estaBarraSeleccionVisible()) obtenerAdapterActivo().salirModoSeleccion() else super.onBackPressed()
     }
 
     private fun actualizarVistaFotoDialogo() {

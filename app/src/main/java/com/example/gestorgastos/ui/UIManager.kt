@@ -10,8 +10,8 @@ class UIManager(private val binding: ActivityMainBinding) {
     fun cambiarVista(vista: MainActivity.Vista, hayDatos: Boolean) {
         // 1. Ocultar todo
         binding.rvGastos.visibility = View.GONE
-        binding.rvCalendario.visibility = View.GONE
-        binding.chartGastos.visibility = View.GONE
+        binding.layoutVistaCalendario.visibility = View.GONE
+        binding.layoutVistaGrafica.visibility = View.GONE
         binding.layoutVistaCategorias.visibility = View.GONE
         binding.tvVacio.visibility = View.GONE
 
@@ -21,9 +21,9 @@ class UIManager(private val binding: ActivityMainBinding) {
                 binding.rvGastos.visibility = View.VISIBLE
                 if (!hayDatos) binding.tvVacio.visibility = View.VISIBLE
             }
-            MainActivity.Vista.CALENDARIO -> binding.rvCalendario.visibility = View.VISIBLE
+            MainActivity.Vista.CALENDARIO -> binding.layoutVistaCalendario.visibility = View.VISIBLE
             MainActivity.Vista.GRAFICA -> {
-                binding.chartGastos.visibility = View.VISIBLE
+                binding.layoutVistaGrafica.visibility = View.VISIBLE
                 binding.chartGastos.animateY(800)
             }
             MainActivity.Vista.QUESITOS -> {

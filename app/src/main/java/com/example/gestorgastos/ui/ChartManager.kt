@@ -21,8 +21,8 @@ class ChartManager(
     private val context: Context,
     private val barChart: BarChart,
     private val pieChart: PieChart,
-    // Callback para cuando se selecciona un quesito
-    private val onCategorySelected: (String?) -> Unit
+    private val onCategorySelected: (String?) -> Unit,
+    private val onBarSelected: (Int?) -> Unit
 ) {
 
     // --- BAR CHART ---
@@ -43,6 +43,14 @@ class ChartManager(
             axisLeft.setDrawGridLines(true)
             axisLeft.gridColor = ContextCompat.getColor(context, R.color.gris_fondo)
             axisLeft.axisMinimum = 0f
+
+            setOnChartValueSelectedListener(object : OnChartValueSelectedListener {
+                override fun onValueSelected(e: Entry?, h: Highlight?) {
+                    val barEntry = e as? BarEntry ?: return
+                    onBarSelected(barEntry.x.toInt())
+                }
+                override fun onNothingSelected() {onBarSelected(null)}
+            })
         }
     }
 

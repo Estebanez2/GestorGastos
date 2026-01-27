@@ -20,35 +20,47 @@ class MainViewConfigurator(
 
     lateinit var adapterLista: GastoAdapter
     lateinit var adapterGastosCategoria: GastoAdapter
+    lateinit var adapterGastosCalendario: GastoAdapter
+    lateinit var adapterGastosGrafica: GastoAdapter
 
     fun setupRecyclerViews(
         onEditGasto: (Gasto) -> Unit,
         onSelectionChanged: (Int) -> Unit,
         onSwipeDelete: (Gasto, GastoAdapter, Int) -> Unit
     ) {
-        // 1. CONFIGURACIÓN LISTA PRINCIPAL
-        adapterLista = GastoAdapter(onEditGasto)
-        adapterLista.onSelectionChanged = onSelectionChanged
-
+        // 1. LISTA PRINCIPAL
+        adapterLista = GastoAdapter(onEditGasto).apply { this.onSelectionChanged = onSelectionChanged }
         binding.rvGastos.apply {
             layoutManager = LinearLayoutManager(context)
             adapter = adapterLista
         }
-        // Swipe inteligente (Izquierda/Derecha + Bloqueo)
         configurarSwipe(binding.rvGastos, adapterLista, onSwipeDelete)
 
-        // 2. CONFIGURACIÓN LISTA CATEGORÍAS (VISTA DONUT)
-        adapterGastosCategoria = GastoAdapter(onEditGasto)
-        adapterGastosCategoria.onSelectionChanged = onSelectionChanged
-
+        // 2. DETALLE CATEGORÍAS (QUESITOS)
+        adapterGastosCategoria = GastoAdapter(onEditGasto).apply { this.onSelectionChanged = onSelectionChanged }
         binding.rvGastosCategoria.apply {
             layoutManager = LinearLayoutManager(context)
             adapter = adapterGastosCategoria
         }
-        // Swipe inteligente también aquí
         configurarSwipe(binding.rvGastosCategoria, adapterGastosCategoria, onSwipeDelete)
 
-        // 3. CONFIGURACIÓN CALENDARIO (Solo LayoutManager, el adapter se pone en el observer)
+        // 3. DETALLE CALENDARIO (NUEVO)
+        adapterGastosCalendario = GastoAdapter(onEditGasto).apply { this.onSelectionChanged = onSelectionChanged }
+        binding.rvGastosCalendario.apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = adapterGastosCalendario
+        }
+        configurarSwipe(binding.rvGastosCalendario, adapterGastosCalendario, onSwipeDelete)
+
+        // 4. DETALLE GRÁFICA BARRAS (NUEVO)
+        adapterGastosGrafica = GastoAdapter(onEditGasto).apply { this.onSelectionChanged = onSelectionChanged }
+        binding.rvGastosGrafica.apply {
+            layoutManager = LinearLayoutManager(context)
+            adapter = adapterGastosGrafica
+        }
+        configurarSwipe(binding.rvGastosGrafica, adapterGastosGrafica, onSwipeDelete)
+
+        // 5. CALENDARIO GRID (LayoutManager)
         binding.rvCalendario.layoutManager = GridLayoutManager(context, 7)
     }
 

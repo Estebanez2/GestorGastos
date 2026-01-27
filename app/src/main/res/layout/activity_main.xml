@@ -155,22 +155,73 @@
             android:paddingBottom="80dp"
             android:visibility="visible"/>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rvCalendario"
+        <LinearLayout
+            android:id="@+id/layoutVistaCalendario"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="8dp"
-            android:clipToPadding="false"
-            android:paddingBottom="80dp"
-            android:visibility="gone"/>
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:weightSum="10">
 
-        <com.github.mikephil.charting.charts.BarChart
-            android:id="@+id/chartGastos"
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvCalendario"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="5"
+                android:padding="8dp"/>
+
+            <TextView
+                android:id="@+id/tvTituloDetalleCalendario"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Toca un día para ver detalles"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:background="#EEEEEE"/>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvGastosCalendario"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="5"
+                android:clipToPadding="false"
+                android:paddingBottom="80dp"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/layoutVistaGrafica"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="16dp"
-            android:paddingBottom="80dp"
-            android:visibility="gone"/>
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:weightSum="10">
+
+            <com.github.mikephil.charting.charts.BarChart
+                android:id="@+id/chartGastos"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="5"
+                android:padding="16dp"/>
+
+            <TextView
+                android:id="@+id/tvTituloDetalleGrafica"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Toca una barra para ver detalles"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:padding="8dp"
+                android:background="#EEEEEE"/>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvGastosGrafica"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="5"
+                android:clipToPadding="false"
+                android:paddingBottom="80dp"/>
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/layoutVistaCategorias"
@@ -204,7 +255,6 @@
                 android:layout_weight="6"
                 android:clipToPadding="false"
                 android:paddingBottom="80dp"/>
-
         </LinearLayout>
 
         <TextView
