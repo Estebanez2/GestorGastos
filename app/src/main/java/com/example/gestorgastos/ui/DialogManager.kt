@@ -9,10 +9,9 @@ import android.widget.ImageView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import com.bumptech.glide.Glide
-import com.example.gestorgastos.R
 import com.example.gestorgastos.data.Gasto
 import com.example.gestorgastos.databinding.DialogAgregarGastoBinding
-import com.example.gestorgastos.databinding.DialogConfiguracionBinding // Asegúrate de tener este XML
+import com.example.gestorgastos.databinding.DialogConfiguracionBinding
 
 class DialogManager(private val context: Context) {
 
@@ -28,8 +27,10 @@ class DialogManager(private val context: Context) {
         onCambiarMoneda: () -> Unit
     ) {
         val binding = DialogConfiguracionBinding.inflate(LayoutInflater.from(context))
-        binding.etAmarillo.setText(actualAmarillo.toString().replace(".", ","))
-        binding.etRojo.setText(actualRojo.toString().replace(".", ","))
+
+        // --- CAMBIO AQUÍ: Usamos la función de formateo para cargar los datos con puntos y comas ---
+        binding.etAmarillo.setText(Formato.formatearParaEditText(actualAmarillo))
+        binding.etRojo.setText(Formato.formatearParaEditText(actualRojo))
 
         binding.etAmarillo.addTextChangedListener(EuroTextWatcher(binding.etAmarillo))
         binding.etRojo.addTextChangedListener(EuroTextWatcher(binding.etRojo))
@@ -38,8 +39,10 @@ class DialogManager(private val context: Context) {
             .setTitle("Configurar Límites")
             .setView(binding.root)
             .setPositiveButton("Guardar") { _, _ ->
+                // Al guardar, quitamos los puntos de miles para que Double.parse funcione
                 val am = binding.etAmarillo.text.toString().replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
                 val ro = binding.etRojo.text.toString().replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
+
                 if (am < ro) onGuardar(am, ro) else Toast.makeText(context, "El límite amarillo debe ser menor al rojo", Toast.LENGTH_LONG).show()
             }
             .setNeutralButton("Divisa") { _, _ -> onCambiarMoneda() }
@@ -72,7 +75,7 @@ class DialogManager(private val context: Context) {
             .show()
     }
 
-    // --- TUS FUNCIONES EXISTENTES (SIN CAMBIOS) ---
+    // --- TUS FUNCIONES EXISTENTES ---
     fun mostrarAgregarGasto(
         listaCategorias: List<String>,
         uriFotoActual: String?,
@@ -95,6 +98,7 @@ class DialogManager(private val context: Context) {
         builder.setView(binding.root)
         builder.setPositiveButton("Guardar") { _, _ ->
             val nombre = binding.etNombre.text.toString()
+            // Aquí quitamos los puntos antes de guardar
             val cantidadStr = binding.etCantidad.text.toString().replace(".", "").replace(",", ".")
             val cat = if (listaCategorias.isNotEmpty()) binding.spinnerCategoria.selectedItem.toString() else "Otros"
 
@@ -128,7 +132,10 @@ class DialogManager(private val context: Context) {
         if (index >= 0) binding.spinnerCategoria.setSelection(index)
 
         binding.etNombre.setText(gasto.nombre)
-        binding.etCantidad.setText(gasto.cantidad.toString().replace(".", ","))
+
+        // --- CAMBIO AQUÍ: Usamos la función de formateo para cargar la cantidad existente ---
+        binding.etCantidad.setText(Formato.formatearParaEditText(gasto.cantidad))
+
         binding.etCantidad.addTextChangedListener(EuroTextWatcher(binding.etCantidad))
         binding.etDescripcion.setText(gasto.descripcion)
 
@@ -140,6 +147,7 @@ class DialogManager(private val context: Context) {
         builder.setView(binding.root)
         builder.setPositiveButton("Actualizar") { _, _ ->
             val nombre = binding.etNombre.text.toString()
+            // Quitamos puntos antes de guardar
             val cantidadStr = binding.etCantidad.text.toString().replace(".", "").replace(",", ".")
             val nuevaCat = if (listaCategorias.isNotEmpty()) binding.spinnerCategoria.selectedItem.toString() else gasto.categoria
 
@@ -159,38 +167,25 @@ class DialogManager(private val context: Context) {
     }
 
     private fun configurarPreviewFoto(binding: DialogAgregarGastoBinding, uri: String?, onBorrar: () -> Unit) {
-
-        // 1. CONFIGURACIÓN DEL CLICK (SIEMPRE ACTIVA)
-        // Definimos qué hace el botón X, independientemente de si está visible o no ahora mismo.
         binding.btnBorrarFoto.setOnClickListener {
-            onBorrar() // 1. Avisamos al Main para que limpie la variable
-
-            // 2. Reseteamos la UI del diálogo visualmente
-            binding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera) // Icono por defecto
+            onBorrar()
+            binding.ivPreviewFoto.setImageResource(android.R.drawable.ic_menu_camera)
             binding.ivPreviewFoto.scaleType = ImageView.ScaleType.CENTER_INSIDE
             binding.ivPreviewFoto.clearColorFilter()
-
-            // Calculamos padding (si tienes el dimen definido úsalo, si no, usa 20dp a ojo)
-            // val padding = context.resources.getDimensionPixelSize(R.dimen.preview_padding_small)
-            val padding = 20 // Valor seguro por si no tienes el dimens.xml a mano
+            val padding = 20
             binding.ivPreviewFoto.setPadding(padding, padding, padding, padding)
-
             binding.ivPreviewFoto.setColorFilter(Color.parseColor("#888888"))
-            binding.ivPreviewFoto.setOnClickListener(null) // Quitamos el zoom
-
-            binding.btnBorrarFoto.visibility = View.GONE // Ocultamos la X
+            binding.ivPreviewFoto.setOnClickListener(null)
+            binding.btnBorrarFoto.visibility = View.GONE
         }
 
-        // 2. ESTADO INICIAL VISUAL
         if (uri != null) {
-            // Si hay foto inicial (Editar), la cargamos
             Glide.with(context).load(uri).centerCrop().into(binding.ivPreviewFoto)
             binding.ivPreviewFoto.setPadding(0, 0, 0, 0)
             binding.ivPreviewFoto.clearColorFilter()
             binding.btnBorrarFoto.visibility = View.VISIBLE
             binding.ivPreviewFoto.setOnClickListener { onImageClick?.invoke(uri) }
         } else {
-            // Si no hay foto inicial (Crear), ocultamos la X
             binding.btnBorrarFoto.visibility = View.GONE
         }
     }

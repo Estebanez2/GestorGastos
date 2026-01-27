@@ -19,4 +19,16 @@ object Formato {
             else -> Locale("es", "ES")  // Euro (formato 1.000,00)
         }
     }
+
+    // Formatea el número para mostrarlo en un EditText (Ej: 1.000,50)
+    // Sin símbolo de moneda, pero con separadores
+    fun formatearParaEditText(cantidad: Double): String {
+        // Usamos Locale.GERMANY o es_ES para asegurar puntos en miles y comas en decimales
+        val formato = java.text.DecimalFormat("#,##0.##")
+        val simbolos = java.text.DecimalFormatSymbols(java.util.Locale("es", "ES"))
+        simbolos.groupingSeparator = '.'
+        simbolos.decimalSeparator = ','
+        formato.decimalFormatSymbols = simbolos
+        return formato.format(cantidad)
+    }
 }
