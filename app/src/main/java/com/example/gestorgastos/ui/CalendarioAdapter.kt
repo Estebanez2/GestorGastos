@@ -14,7 +14,7 @@ import java.time.format.DateTimeFormatter
 class CalendarioAdapter(
     private val mes: YearMonth,
     private val gastos: List<Gasto>,
-    private val onDiaClick: (java.time.LocalDate) -> Unit
+    private val onDiaClick: (LocalDate) -> Unit
 ) : RecyclerView.Adapter<CalendarioAdapter.DiaViewHolder>() {
 
     // Calculamos qué día de la semana cae el 1 (Lunes=1, ... Domingo=7)
@@ -27,11 +27,8 @@ class CalendarioAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DiaViewHolder {
         val binding = ItemDiaCalendarioBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-
-        // --- TRUCO PARA ELIMINAR EL SCROLL ---
         // 1. Obtenemos la altura total disponible del RecyclerView (el hueco que le has dado en pantalla)
         val alturaTotal = parent.measuredHeight
-
         // 2. Si la altura es válida, forzamos que cada celda mida exactamente 1/6 del total.
         // (Usamos 6 porque es el máximo de semanas que puede tener un mes visualmente)
         if (alturaTotal > 0) {

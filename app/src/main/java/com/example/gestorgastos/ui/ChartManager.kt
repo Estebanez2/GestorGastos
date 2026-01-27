@@ -2,19 +2,24 @@ package com.example.gestorgastos.ui
 
 import android.content.Context
 import android.graphics.Color
+import android.view.MotionEvent
 import androidx.core.content.ContextCompat
 import com.example.gestorgastos.R
 import com.example.gestorgastos.data.Gasto
 import com.github.mikephil.charting.animation.Easing
 import com.github.mikephil.charting.charts.BarChart
 import com.github.mikephil.charting.charts.PieChart
+import com.github.mikephil.charting.components.LimitLine
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.*
 import com.github.mikephil.charting.formatter.ValueFormatter
 import com.github.mikephil.charting.highlight.Highlight
+import com.github.mikephil.charting.listener.ChartTouchListener
 import com.github.mikephil.charting.listener.OnChartValueSelectedListener
 import com.github.mikephil.charting.utils.ColorTemplate
+import com.github.mikephil.charting.listener.OnChartGestureListener
 import java.time.Instant
+import java.time.YearMonth
 import java.time.ZoneId
 
 class ChartManager(
@@ -30,57 +35,119 @@ class ChartManager(
         barChart.apply {
             description.isEnabled = false
             legend.isEnabled = false
-            setDrawGridBackground(false)
-            setFitBars(true)
-            animateY(1500)
 
-            xAxis.position = XAxis.XAxisPosition.BOTTOM
-            xAxis.setDrawGridLines(false)
-            xAxis.granularity = 1f
-            xAxis.textColor = ContextCompat.getColor(context, android.R.color.darker_gray)
+            // --- 1. CONFIGURACIÓN DE ZOOM Y GESTOS ---
+            setTouchEnabled(true)
+            isDragEnabled = true
+            setScaleEnabled(true)
+            setPinchZoom(false) // false es mejor para gráficas de tiempo (solo zoom X)
+
+            // Desactivamos el zoom in automático con doble toque
+            isDoubleTapToZoomEnabled = false
+
+            // Agregamos el listener para que el doble toque RESETEE la vista
+            onChartGestureListener = object : OnChartGestureListener {
+                override fun onChartDoubleTapped(me: MotionEvent?) {
+                    fitScreen() // Vuelve a ver el mes completo
+                }
+                override fun onChartGestureStart(me: MotionEvent?, lastPerformedGesture: ChartTouchListener.ChartGesture?) {}
+                override fun onChartGestureEnd(me: MotionEvent?, lastPerformedGesture: ChartTouchListener.ChartGesture?) {}
+                override fun onChartLongPressed(me: MotionEvent?) {}
+                override fun onChartSingleTapped(me: MotionEvent?) {}
+                override fun onChartFling(me1: MotionEvent?, me2: MotionEvent?, velocityX: Float, velocityY: Float) {}
+                override fun onChartScale(me: MotionEvent?, scaleX: Float, scaleY: Float) {}
+                override fun onChartTranslate(me: MotionEvent?, dX: Float, dY: Float) {}
+            }
+
+            // --- 2. LIMPIEZA VISUAL ---
+            setDrawGridBackground(false)
+            setDrawBorders(false)
+            setFitBars(true)
+            animateY(1200, Easing.EaseOutCubic)
+            extraBottomOffset = 10f
+            extraTopOffset = 0f
+            minOffset = 0f
+
+            // --- 3. CONFIGURACIÓN EJE X (DÍAS) ---
+            xAxis.apply {
+                position = XAxis.XAxisPosition.BOTTOM
+                setDrawGridLines(false)
+                setDrawAxisLine(false)
+                setDrawLimitLinesBehindData(false)
+                granularity = 1f
+                textColor = ContextCompat.getColor(context, R.color.purple_200) // O tu color gris oscuro
+                textSize = 10f
+                valueFormatter = object : ValueFormatter() {
+                    override fun getFormattedValue(value: Float): String = value.toInt().toString()
+                }
+            }
 
             axisRight.isEnabled = false
-            axisLeft.setDrawGridLines(true)
-            axisLeft.gridColor = ContextCompat.getColor(context, R.color.gris_fondo)
-            axisLeft.axisMinimum = 0f
 
+            // --- 4. CONFIGURACIÓN EJE Y (DINERO) ---
+            axisLeft.apply {
+                setDrawGridLines(true)
+                enableGridDashedLine(10f, 10f, 0f) // Rejilla discontinua
+                gridColor = Color.parseColor("#E0E0E0")
+                setDrawAxisLine(false)
+                textColor = ContextCompat.getColor(context, R.color.purple_200)
+                axisMinimum = 0f
+            }
+
+            // --- 5. AÑADIR MARKER VIEW (GLOBO) ---
+            val marker = CustomMarkerView(context, R.layout.marker_view)
+            marker.chartView = this
+            this.marker = marker
+
+            // Listener de selección (Click en barra)
             setOnChartValueSelectedListener(object : OnChartValueSelectedListener {
                 override fun onValueSelected(e: Entry?, h: Highlight?) {
                     val barEntry = e as? BarEntry ?: return
                     onBarSelected(barEntry.x.toInt())
                 }
-                override fun onNothingSelected() {onBarSelected(null)}
+                override fun onNothingSelected() {
+                    onBarSelected(null)
+                }
             })
         }
     }
 
-    fun actualizarBarChart(listaGastos: List<Gasto>, limiteRojo: Double, limiteAmarillo: Double) {
+    fun actualizarBarChart(listaGastos: List<Gasto>, limiteRojo: Double, limiteAmarillo: Double, mes: YearMonth, mostrarLimite: Boolean) {
         if (listaGastos.isEmpty()) {
             barChart.clear()
             return
         }
 
+        // 1. Agrupar gastos por día
         val gastosPorDia = mutableMapOf<Int, Double>()
         for (gasto in listaGastos) {
             val fecha = Instant.ofEpochMilli(gasto.fecha).atZone(ZoneId.systemDefault()).toLocalDate()
             gastosPorDia[fecha.dayOfMonth] = (gastosPorDia[fecha.dayOfMonth] ?: 0.0) + gasto.cantidad
         }
 
+        // 2. CÁLCULO REALISTA DE LÍMITES (Basado en días del mes EXACTOS)
+        val diasEnElMes = mes.lengthOfMonth()
+        val diasActivosEstimados = 12.0
+        // El límite diario es el tope mensual dividido entre los días REALES de ese mes
+        val umbralDiarioRojo = limiteRojo / diasActivosEstimados
+        val umbralDiarioAmarillo = limiteAmarillo / diasActivosEstimados
+
+        // 3. Crear las barras
         val entradas = ArrayList<BarEntry>()
         val colores = ArrayList<Int>()
-        val colorVerde = ContextCompat.getColor(context, R.color.alerta_verde)
-        val colorAmarillo = ContextCompat.getColor(context, R.color.alerta_amarillo)
-        val colorRojo = ContextCompat.getColor(context, R.color.alerta_rojo)
 
-        val umbralDiarioRojo = limiteRojo / 20.0
-        val umbralDiarioAmarillo = limiteAmarillo / 20.0
+        val colorVerde = Color.parseColor("#66BB6A")
+        val colorAmarillo = Color.parseColor("#FFA726")
+        val colorRojo = Color.parseColor("#EF5350")
 
-        // Asumimos mes actual (o el máximo día registrado para simplificar lógica visual)
-        val maxDia = gastosPorDia.keys.maxOrNull() ?: 30
+        // Iteramos hasta el último día que tenga gastos registrados
+        val maxDia = gastosPorDia.keys.maxOrNull() ?: diasEnElMes
 
         for (i in 1..maxDia) {
             val total = gastosPorDia[i]?.toFloat() ?: 0f
             entradas.add(BarEntry(i.toFloat(), total))
+
+            // Colorear según los umbrales diarios calculados
             when {
                 total >= umbralDiarioRojo -> colores.add(colorRojo)
                 total >= umbralDiarioAmarillo -> colores.add(colorAmarillo)
@@ -90,15 +157,31 @@ class ChartManager(
 
         val dataSet = BarDataSet(entradas, "Gastos").apply {
             colors = colores
-            valueTextSize = 11f
-            valueTextColor = ContextCompat.getColor(context, android.R.color.black)
-            valueFormatter = object : ValueFormatter() {
-                override fun getFormattedValue(value: Float): String =
-                    if (value > 0) Formato.formatearMoneda(value.toDouble()) else ""
-            }
+            setDrawValues(false) // Ocultamos valores (se ven con el Marker)
+            highLightAlpha = 50
         }
 
-        barChart.data = BarData(dataSet).apply { barWidth = 0.6f }
+        // 4. LÍNEAS DE LÍMITE (LimitLines)
+        val axisLeft = barChart.axisLeft
+        axisLeft.removeAllLimitLines()
+
+        if (mostrarLimite) {
+            // Dibujamos la línea del tope diario
+            val textoLimite = "Máx Diario ${Formato.formatearMoneda(umbralDiarioRojo)}"
+            val lineaRoja = LimitLine(umbralDiarioRojo.toFloat(), textoLimite).apply {
+                lineColor = Color.BLACK
+                lineWidth = 1f
+                enableDashedLine(10f, 10f, 0f)
+                labelPosition = LimitLine.LimitLabelPosition.RIGHT_TOP
+                textSize = 15f
+                textColor = Color.BLACK
+            }
+            axisLeft.addLimitLine(lineaRoja)
+        }
+        axisLeft.setDrawLimitLinesBehindData(false)
+
+        // 5. Asignar datos y refrescar
+        barChart.data = BarData(dataSet).apply { barWidth = 0.65f }
         barChart.invalidate()
     }
 

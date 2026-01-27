@@ -28,6 +28,7 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
+import java.time.YearMonth
 
 class MainActivity : AppCompatActivity() {
 
@@ -186,27 +187,31 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnCerrarSeleccion.setOnClickListener { obtenerAdapterActivo().salirModoSeleccion() }
         binding.btnBorrarSeleccionados.setOnClickListener { procesarBorradoMultiple() }
+        binding.cbMostrarLimite.setOnCheckedChangeListener { _, isChecked ->
+            val lista = viewModel.gastosVisibles.value ?: emptyList()
+            if (lista.isNotEmpty()) {
+                val mes = viewModel.mesActual.value ?: YearMonth.now()
+                chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo, mes,isChecked)
+            }
+        }
     }
 
     private fun setupObservers() {
         viewModel.gastosVisibles.observe(this) { lista ->
-            // 1. Actualizaciones generales (Lista principal, totales, colores...)
             viewConfigurator.adapterLista.submitList(lista)
-            filtrarListaCategorias() // Mantiene filtro de quesitos
-
+            filtrarListaCategorias()
             val total = lista.sumOf { it.cantidad }
             binding.tvTotalMes.text = Formato.formatearMoneda(total)
             binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, viewModel.obtenerColorAlerta(total)))
             uiManager.cambiarVista(vistaActual, lista.isNotEmpty())
             gestionarTitulo(lista.size)
-            // 2. Actualizar GRÁFICA y CALENDARIO (Visual)
-            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
+            val mes = viewModel.mesActual.value ?: YearMonth.now()
+            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo, mes, binding.cbMostrarLimite.isChecked)
             chartManager.actualizarPieChart(lista, categoriaSeleccionada)
-            val mes = viewModel.mesActual.value ?: java.time.YearMonth.now()
             adapterCalendario = CalendarioAdapter(mes, lista) { fecha ->
                 fechaCalendarioSeleccionada = fecha
                 val filtrados = lista.filter {
-                    val f = java.time.Instant.ofEpochMilli(it.fecha).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    val f = Instant.ofEpochMilli(it.fecha).atZone(ZoneId.systemDefault()).toLocalDate()
                     f == fecha
                 }
                 viewConfigurator.adapterGastosCalendario.submitList(filtrados)
@@ -216,7 +221,7 @@ class MainActivity : AppCompatActivity() {
             binding.rvCalendario.adapter = adapterCalendario
             if (fechaCalendarioSeleccionada != null) {
                 val filtrados = lista.filter {
-                    val f = java.time.Instant.ofEpochMilli(it.fecha).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    val f = Instant.ofEpochMilli(it.fecha).atZone(ZoneId.systemDefault()).toLocalDate()
                     f == fechaCalendarioSeleccionada
                 }
                 viewConfigurator.adapterGastosCalendario.submitList(filtrados)
@@ -226,7 +231,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (diaGraficaSeleccionado != null) {
                 val filtrados = lista.filter {
-                    val f = java.time.Instant.ofEpochMilli(it.fecha).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                    val f = Instant.ofEpochMilli(it.fecha).atZone(ZoneId.systemDefault()).toLocalDate()
                     f.dayOfMonth == diaGraficaSeleccionado
                 }
                 viewConfigurator.adapterGastosGrafica.submitList(filtrados)
@@ -235,32 +240,24 @@ class MainActivity : AppCompatActivity() {
                 binding.tvTituloDetalleGrafica.text = "Toca una barra para ver detalles"
             }
         }
-
         viewModel.mesActual.observe(this) {
             if (!viewModel.estaBuscando()) gestionarTitulo(viewModel.gastosVisibles.value?.size ?: 0)
         }
         viewModel.notificarCambioLimites.observe(this) {
-            // 1. Recalcular datos actuales con los nuevos límites
             val lista = viewModel.gastosVisibles.value ?: emptyList()
             val total = lista.sumOf { it.cantidad }
-            // 2. Actualizar la UI estática (Lista, Gráfica y Color de fondo fijo)
-            adapterLista.notifyDataSetChanged()
+            val mes = viewModel.mesActual.value ?: YearMonth.now()
+            viewConfigurator.adapterLista.notifyDataSetChanged()
             binding.layoutAlerta.setBackgroundColor(ContextCompat.getColor(this, viewModel.obtenerColorAlerta(total)))
-            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo)
-            // 3. Ejecutar el Flash para dar feedback inmediato
+            chartManager.actualizarBarChart(lista, viewModel.limiteRojo, viewModel.limiteAmarillo, mes, binding.cbMostrarLimite.isChecked)
             uiManager.ejecutarEfectoSemaforo(totalActual = total, gastoNuevo = 0.0, limAmarillo = viewModel.limiteAmarillo, limRojo = viewModel.limiteRojo)
         }
         viewModel.listaCategorias.observe(this) { lista ->
             val mapa = lista.associate { it.nombre to it.uriFoto }
-            // Pasamos el mapa a TODOS los adaptadores
             viewConfigurator.adapterLista.mapaCategorias = mapa
             viewConfigurator.adapterGastosCategoria.mapaCategorias = mapa
-
-            // --- NUEVO: ARREGLO DE FOTOS EN CALENDARIO Y GRÁFICA ---
             viewConfigurator.adapterGastosCalendario.mapaCategorias = mapa
             viewConfigurator.adapterGastosGrafica.mapaCategorias = mapa
-
-            // Notificamos cambios para que se repinten las fotos al instante
             viewConfigurator.adapterLista.notifyDataSetChanged()
             viewConfigurator.adapterGastosCategoria.notifyDataSetChanged()
             viewConfigurator.adapterGastosCalendario.notifyDataSetChanged()
