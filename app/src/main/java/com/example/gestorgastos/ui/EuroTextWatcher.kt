@@ -9,80 +9,82 @@ import java.util.Locale
 
 class EuroTextWatcher(private val editText: EditText) : TextWatcher {
 
-    private val df: DecimalFormat
-    private val dfnd: DecimalFormat
+    private var isUpdating = false
+    private val decimalFormat: DecimalFormat
 
     init {
+        // Configuramos el formato para miles: 1.000, 10.000...
         val symbols = DecimalFormatSymbols(Locale("es", "ES"))
-        symbols.decimalSeparator = ','
         symbols.groupingSeparator = '.'
-
-        // Formato con decimales: 1.234,56
-        df = DecimalFormat("#,###.##", symbols)
-        df.isDecimalSeparatorAlwaysShown = true
-
-        // Formato enteros: 1.234
-        dfnd = DecimalFormat("#,###", symbols)
-    }
-
-    override fun afterTextChanged(s: Editable?) {
-        // 1. Quitamos el listener para evitar bucle infinito al modificar el texto
-        editText.removeTextChangedListener(this)
-
-        try {
-            val originalString = s.toString()
-
-            // Guardamos la posición del cursor antes de tocar nada
-            val cursorPosition = editText.selectionStart
-            val inilen = originalString.length
-
-            // Limpiamos la cadena: quitamos puntos y cambiamos coma por punto para calcular
-            val cleanString = originalString.replace(".", "").replace(",", ".")
-
-            if (cleanString.isNotEmpty() && cleanString != ".") {
-                val parsed = cleanString.toDouble()
-                var formattedString: String
-
-                // Decidimos qué formato aplicar
-                if (originalString.contains(",")) {
-                    formattedString = df.format(parsed)
-
-                    // Truco para mantener la coma si el usuario la acaba de escribir
-                    // DecimalFormat tiende a borrar "12," y dejarlo en "12"
-                    if (originalString.endsWith(",")) {
-                        formattedString = dfnd.format(parsed) + ","
-                    } else if (originalString.endsWith(",0")) {
-                        // Caso especial para escribir decimales exactos
-                        formattedString = dfnd.format(parsed) + ",0"
-                    }
-                } else {
-                    formattedString = dfnd.format(parsed)
-                }
-
-                editText.setText(formattedString)
-
-                // Recalcular posición del cursor
-                val endlen = editText.text.length
-                val selection = (cursorPosition + (endlen - inilen))
-
-                // Validamos que el cursor no se salga de los límites
-                if (selection > 0 && selection <= editText.text.length) {
-                    editText.setSelection(selection)
-                } else {
-                    editText.setSelection(editText.text.length)
-                }
-            }
-
-        } catch (nfe: NumberFormatException) {
-            // Si hay error de formato, no hacemos nada
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 2. Volvemos a activar el listener
-        editText.addTextChangedListener(this)
+        symbols.decimalSeparator = ','
+        decimalFormat = DecimalFormat("#,###", symbols)
     }
 
     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+
+    override fun afterTextChanged(s: Editable?) {
+        // Evitamos bucle infinito
+        if (isUpdating) return
+
+        val originalString = s.toString()
+        if (originalString.isEmpty()) return
+
+        isUpdating = true
+
+        try {
+            // 1. Limpieza: Quitamos los puntos de miles para analizar
+            // NO quitamos la coma todavía
+            val cleanString = originalString.replace(".", "")
+
+            val formattedString: String
+            var selectionIndex = editText.selectionStart
+
+            // 2. Lógica de Separación
+            if (cleanString.contains(",")) {
+                // Si hay coma, separamos en Entero y Decimal
+                val parts = cleanString.split(",")
+                val integerPart = parts[0]
+                var decimalPart = if (parts.size > 1) parts[1] else ""
+
+                // Limitamos a 2 decimales
+                if (decimalPart.length > 2) {
+                    decimalPart = decimalPart.substring(0, 2)
+                }
+
+                // Formateamos solo la parte entera con puntos
+                val formattedInt = if (integerPart.isNotEmpty()) {
+                    try {
+                        decimalFormat.format(integerPart.toDouble())
+                    } catch (e: Exception) { integerPart }
+                } else {
+                    "" // Caso raro: empieza por , (,50)
+                }
+
+                // Reconstruimos: Entero + Coma + Decimales (tal cual los escribió el usuario)
+                formattedString = "$formattedInt,$decimalPart"
+
+            } else {
+                // Si NO hay coma, es un entero normal. Formateamos con puntos.
+                formattedString = try {
+                    decimalFormat.format(cleanString.toDouble())
+                } catch (e: Exception) {
+                    cleanString
+                }
+            }
+
+            // 3. Aplicar cambios solo si es necesario
+            if (formattedString != originalString) {
+                editText.setText(formattedString)
+
+                // Intentamos mantener el cursor al final para evitar saltos raros al escribir rápido
+                editText.setSelection(formattedString.length)
+            }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        isUpdating = false
+    }
 }

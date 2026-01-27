@@ -37,11 +37,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/margin_small"
             android:hint="Cantidad (ej. 10,5)">
+
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/etCantidad"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="numberDecimal"/>
+                android:inputType="numberDecimal"
+                android:digits="0123456789.," />
         </com.google.android.material.textfield.TextInputLayout>
 
         <Spinner
