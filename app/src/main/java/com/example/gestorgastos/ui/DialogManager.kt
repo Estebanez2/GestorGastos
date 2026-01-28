@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
+import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.ImageView
 import android.widget.Toast
@@ -85,9 +86,14 @@ class DialogManager(private val context: Context) {
         val builder = AlertDialog.Builder(context)
         val binding = DialogAgregarGastoBinding.inflate(LayoutInflater.from(context))
 
-        val adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, listaCategorias)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerCategoria.adapter = adapter
+        // 1. Configurar el adaptador para el AutoCompleteTextView
+        val adapter = ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, listaCategorias)
+        binding.actvCategoria.setAdapter(adapter)
+
+        // Opcional: Si quieres que aparezca seleccionada la primera categoría por defecto si no hay nada en el XML
+        if (listaCategorias.isNotEmpty() && binding.actvCategoria.text.isEmpty()) {
+            binding.actvCategoria.setText(listaCategorias[0], false)
+        }
 
         binding.etCantidad.addTextChangedListener(EuroTextWatcher(binding.etCantidad))
         configurarPreviewFoto(binding, uriFotoActual, onBorrarFoto)
@@ -98,19 +104,26 @@ class DialogManager(private val context: Context) {
         builder.setView(binding.root)
         builder.setPositiveButton("Guardar") { _, _ ->
             val nombre = binding.etNombre.text.toString()
-            // Aquí quitamos los puntos antes de guardar
             val cantidadStr = binding.etCantidad.text.toString().replace(".", "").replace(",", ".")
-            val cat = if (listaCategorias.isNotEmpty()) binding.spinnerCategoria.selectedItem.toString() else "Otros"
+
+            // 2. Obtener el texto directamente del AutoCompleteTextView
+            val cat = binding.actvCategoria.text.toString()
+
+            // Validación simple: Si está vacío, asignar "Otros" o la primera categoría
+            val categoriaFinal = if (cat.isNotEmpty()) cat else "Otros"
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cant = cantidadStr.toDoubleOrNull() ?: 0.0
-                onGuardar(nombre, cant, binding.etDescripcion.text.toString(), cat)
+                onGuardar(nombre, cant, binding.etDescripcion.text.toString(), categoriaFinal)
             } else {
                 Toast.makeText(context, "Faltan datos", Toast.LENGTH_SHORT).show()
             }
         }
         builder.setNegativeButton("Cancelar", null)
-        return builder.show()
+        val dialog = builder.create()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        dialog.show()
+        return dialog
     }
 
     fun mostrarEditarGasto(
@@ -124,18 +137,16 @@ class DialogManager(private val context: Context) {
         val binding = DialogAgregarGastoBinding.inflate(LayoutInflater.from(context))
         binding.tvTituloDialogo.text = "Editar Gasto"
 
-        val adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, listaCategorias)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerCategoria.adapter = adapter
+        // 1. Configurar el adaptador
+        val adapter = ArrayAdapter(context, android.R.layout.simple_dropdown_item_1line, listaCategorias)
+        binding.actvCategoria.setAdapter(adapter)
 
-        val index = listaCategorias.indexOf(gasto.categoria)
-        if (index >= 0) binding.spinnerCategoria.setSelection(index)
+        // 2. Pre-seleccionar la categoría existente
+        // El 'false' es vital: evita que se despliegue la lista o se filtre al establecer el texto inicial
+        binding.actvCategoria.setText(gasto.categoria, false)
 
         binding.etNombre.setText(gasto.nombre)
-
-        // --- CAMBIO AQUÍ: Usamos la función de formateo para cargar la cantidad existente ---
         binding.etCantidad.setText(Formato.formatearParaEditText(gasto.cantidad))
-
         binding.etCantidad.addTextChangedListener(EuroTextWatcher(binding.etCantidad))
         binding.etDescripcion.setText(gasto.descripcion)
 
@@ -147,9 +158,10 @@ class DialogManager(private val context: Context) {
         builder.setView(binding.root)
         builder.setPositiveButton("Actualizar") { _, _ ->
             val nombre = binding.etNombre.text.toString()
-            // Quitamos puntos antes de guardar
             val cantidadStr = binding.etCantidad.text.toString().replace(".", "").replace(",", ".")
-            val nuevaCat = if (listaCategorias.isNotEmpty()) binding.spinnerCategoria.selectedItem.toString() else gasto.categoria
+
+            // 3. Obtener la nueva categoría
+            val nuevaCat = binding.actvCategoria.text.toString()
 
             if (nombre.isNotEmpty() && cantidadStr.isNotEmpty()) {
                 val cant = cantidadStr.toDoubleOrNull() ?: 0.0
@@ -157,13 +169,16 @@ class DialogManager(private val context: Context) {
                     nombre = nombre,
                     cantidad = cant,
                     descripcion = binding.etDescripcion.text.toString(),
-                    categoria = nuevaCat
+                    categoria = if (nuevaCat.isNotEmpty()) nuevaCat else gasto.categoria
                 )
                 onActualizar(gastoEditado)
             }
         }
         builder.setNegativeButton("Cancelar", null)
-        return builder.show()
+        val dialog = builder.create()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        dialog.show()
+        return dialog
     }
 
     private fun configurarPreviewFoto(binding: DialogAgregarGastoBinding, uri: String?, onBorrar: () -> Unit) {
