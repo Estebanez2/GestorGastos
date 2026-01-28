@@ -28,116 +28,141 @@ import java.util.UUID
 object ExportarHelper {
 
     fun capturarVista(view: View): Bitmap {
+        // Aseguramos que la vista tenga dimensiones válidas
+        if (view.width == 0 || view.height == 0) return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
+        val bgDrawable = view.background
+        if (bgDrawable != null) bgDrawable.draw(canvas) else canvas.drawColor(Color.WHITE)
         view.draw(canvas)
         return bitmap
     }
 
-    fun unirVistasEnBitmap(viewCabecera: View, viewTitulo: View, bitmapContenido: Bitmap): Bitmap {
-        val ancho = maxOf(viewCabecera.width, viewTitulo.width, bitmapContenido.width)
-        val altoTotal = viewCabecera.height + viewTitulo.height + bitmapContenido.height + 50
+    fun unirVistasEnBitmap(
+        viewCabecera: View,
+        viewTitulo: View,
+        bitmapContenido: Bitmap,
+        context: Context
+    ): Bitmap {
+        // 1. Capturamos las vistas TAL CUAL están (sin modificarlas para no buguear la UI)
+        val bmpCabecera = capturarVista(viewCabecera)
+        val bmpTitulo = capturarVista(viewTitulo)
 
-        val bitmapFinal = Bitmap.createBitmap(ancho, altoTotal, Bitmap.Config.ARGB_8888)
+        // 2. Calculamos el ancho final (el máximo de los tres)
+        val anchoFinal = maxOf(bmpCabecera.width, bmpTitulo.width, bitmapContenido.width)
+        val altoTotal = bmpCabecera.height + bmpTitulo.height + bitmapContenido.height + 50
+
+        val bitmapFinal = Bitmap.createBitmap(anchoFinal, altoTotal, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmapFinal)
         canvas.drawColor(Color.WHITE)
 
-        // 1. Cabecera
-        viewCabecera.draw(canvas)
+        // --- TRUCO DEL FONDO AMARILLO ---
+        // En lugar de estirar la vista, tomamos el color del píxel (0,0) de la cabecera (el amarillo)
+        // y pintamos un rectángulo que ocupe todo el ancho.
+        val colorFondoCabecera = bmpCabecera.getPixel(10, 10) // Muestreamos el color
+        val paintFondo = android.graphics.Paint().apply { color = colorFondoCabecera }
 
-        // 2. Título
-        canvas.save()
-        canvas.translate(0f, viewCabecera.height.toFloat())
-        viewTitulo.draw(canvas)
-        canvas.restore()
+        // Pintamos el fondo amarillo ocupando todo el ancho de la zona de cabecera
+        canvas.drawRect(0f, 0f, anchoFinal.toFloat(), bmpCabecera.height.toFloat(), paintFondo)
 
-        // 3. Contenido
-        canvas.save()
-        val yContenido = viewCabecera.height.toFloat() + viewTitulo.height.toFloat() + 20f
-        canvas.translate(0f, yContenido)
-        val xOffset = (ancho - bitmapContenido.width) / 2f
-        canvas.drawBitmap(bitmapContenido, xOffset, 0f, null)
-        canvas.restore()
+        // 3. DIBUJAR CABECERA (Centrada sobre el fondo amarillo extendido)
+        val xCabecera = (anchoFinal - bmpCabecera.width) / 2f
+        canvas.drawBitmap(bmpCabecera, xCabecera, 0f, null)
+
+        // 4. DIBUJAR TÍTULO (Debajo)
+        // Hacemos lo mismo para el título si tuviera fondo
+        val yTitulo = bmpCabecera.height.toFloat()
+        /* Si el título tuviera color de fondo, haríamos lo mismo que arriba aquí */
+        val xTitulo = (anchoFinal - bmpTitulo.width) / 2f
+        canvas.drawBitmap(bmpTitulo, xTitulo, yTitulo, null)
+
+        // 5. DIBUJAR CONTENIDO (Gráfica/Calendario + Lista)
+        val yContenido = yTitulo + bmpTitulo.height.toFloat() + 20f
+        val xContenido = (anchoFinal - bitmapContenido.width) / 2f
+        canvas.drawBitmap(bitmapContenido, xContenido, yContenido, null)
 
         return bitmapFinal
     }
 
-    fun generarTextoCSV(listaGastos: List<Gasto>): String {
-        val stringBuilder = StringBuilder()
-        stringBuilder.append("Fecha,Categoria,Concepto,Descripcion,Cantidad\n") // He añadido Categoria al CSV también
-        val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-        for (gasto in listaGastos) {
-            val nombreLimpio = gasto.nombre.replace(",", " ")
-            val descLimpia = gasto.descripcion.replace(",", " ")
-            val fechaStr = dateFormat.format(Date(gasto.fecha))
-            val cantidadStr = gasto.cantidad.toString().replace(".", ",")
-            // CSV ahora incluye la categoría
-            stringBuilder.append("$fechaStr,${gasto.categoria},$nombreLimpio,$descLimpia,$cantidadStr\n")
-        }
-        return stringBuilder.toString()
+    fun combinarBitmapsVerticalmente(arriba: Bitmap, abajo: Bitmap?): Bitmap {
+        if (abajo == null) return arriba
+
+        val ancho = maxOf(arriba.width, abajo.width)
+        val alto = arriba.height + abajo.height
+
+        val combinado = Bitmap.createBitmap(ancho, alto, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(combinado)
+        canvas.drawColor(Color.WHITE)
+
+        val xOffsetArriba = (ancho - arriba.width) / 2f
+        canvas.drawBitmap(arriba, xOffsetArriba, 0f, null)
+
+        val xOffsetAbajo = (ancho - abajo.width) / 2f
+        canvas.drawBitmap(abajo, xOffsetAbajo, arriba.height.toFloat(), null)
+
+        return combinado
     }
 
-    // --- GENERAR IMAGEN LARGA (Corregido Iconos) ---
-    fun generarImagenLarga(
+    // --- GENERAR LISTA LARGA (Incluye tu corrección de categorías) ---
+    fun generarImagenListaItems(
         context: Context,
-        viewCabecera: View,
-        viewTitulo: View,
         listaGastos: List<Gasto>,
-        mapaBitmaps: Map<Long, Bitmap>
+        mapaBitmapsGastos: Map<Long, Bitmap>,
+        mapaCategoriasUri: Map<String, String?>,
+        anchoDeseado: Int
     ): Bitmap? {
         if (listaGastos.isEmpty()) return null
 
-        val ancho = viewCabecera.width
         val bindingItem = ItemGastoBinding.inflate(LayoutInflater.from(context))
 
-        // 1. Calcular altura total
-        var alturaTotal = viewCabecera.height + viewTitulo.height + 50
+        // Medir altura total
+        var alturaTotal = 0
         val itemsHeights = mutableListOf<Int>()
 
         for (gasto in listaGastos) {
             bindingItem.tvNombre.text = gasto.nombre
-
-            // Medimos visibilidad de foto para la altura correcta
-            val tieneFoto = gasto.uriFoto != null || mapaBitmaps.containsKey(gasto.id)
+            val tieneFoto = gasto.uriFoto != null || mapaBitmapsGastos.containsKey(gasto.id)
             bindingItem.cardThumb.visibility = if (tieneFoto) View.VISIBLE else View.GONE
-            bindingItem.ivThumb.visibility = if (tieneFoto) View.VISIBLE else View.GONE
 
+            // Medimos con el ancho deseado
             bindingItem.root.measure(
-                View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(anchoDeseado, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             )
             itemsHeights.add(bindingItem.root.measuredHeight)
             alturaTotal += bindingItem.root.measuredHeight
         }
 
-        // 2. Crear Lienzo
-        val bitmap = Bitmap.createBitmap(ancho, alturaTotal, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(anchoDeseado, alturaTotal, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
 
-        // 3. Dibujar Cabecera y Título
-        viewCabecera.draw(canvas)
-        canvas.save()
-        canvas.translate(0f, viewCabecera.height.toFloat())
-        viewTitulo.draw(canvas)
-        canvas.restore()
-
-        // 4. Dibujar Lista
-        var currentY = viewCabecera.height.toFloat() + viewTitulo.height.toFloat() + 20f
+        var currentY = 0f
 
         for ((index, gasto) in listaGastos.withIndex()) {
-            // Datos de texto
+            // Rellenar datos
             bindingItem.tvNombre.text = gasto.nombre
             bindingItem.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
             bindingItem.tvFecha.text = SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(gasto.fecha))
 
-            // --- NUEVO: PINTAR CATEGORÍA CORRECTA ---
-            val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
-            bindingItem.ivIconoCategoria.setImageResource(iconoRes)
+            // CATEGORÍA (Tu lógica corregida)
+            val uriCat = mapaCategoriasUri[gasto.categoria]
+            if (uriCat != null) {
+                try {
+                    val bitmapCat = com.bumptech.glide.Glide.with(context)
+                        .asBitmap().load(uriCat).submit(48, 48).get()
+                    bindingItem.ivIconoCategoria.setImageBitmap(bitmapCat)
+                    bindingItem.ivIconoCategoria.setPadding(0,0,0,0)
+                } catch (e: Exception) {
+                    bindingItem.ivIconoCategoria.setImageResource(CategoriasHelper.obtenerIcono(gasto.categoria))
+                }
+            } else {
+                bindingItem.ivIconoCategoria.setImageResource(CategoriasHelper.obtenerIcono(gasto.categoria))
+            }
 
-            // Gestión de Foto
-            val bitmapPrecargado = mapaBitmaps[gasto.id]
+            // FOTO GASTO
+            val bitmapPrecargado = mapaBitmapsGastos[gasto.id]
             if (bitmapPrecargado != null) {
                 bindingItem.cardThumb.visibility = View.VISIBLE
                 bindingItem.ivThumb.visibility = View.VISIBLE
@@ -145,19 +170,115 @@ object ExportarHelper {
                 bindingItem.ivThumb.setPadding(0,0,0,0)
             } else if (gasto.uriFoto != null) {
                 bindingItem.cardThumb.visibility = View.VISIBLE
-                bindingItem.ivThumb.visibility = View.VISIBLE
                 bindingItem.ivThumb.setImageResource(android.R.drawable.ic_menu_gallery)
-                bindingItem.ivThumb.setPadding(20,20,20,20)
             } else {
                 bindingItem.cardThumb.visibility = View.GONE
-                bindingItem.ivThumb.visibility = View.GONE
             }
 
-            // Dibujar
+            // Dibujar en posición
             bindingItem.root.measure(
-                View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(anchoDeseado, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             )
+            bindingItem.root.layout(0, 0, anchoDeseado, bindingItem.root.measuredHeight)
+
+            canvas.save()
+            canvas.translate(0f, currentY)
+            bindingItem.root.draw(canvas)
+            canvas.restore()
+
+            currentY += itemsHeights[index]
+        }
+        return bitmap
+    }
+    // --- GENERAR IMAGEN LARGA (Corregido Iconos) ---
+    fun generarImagenLarga(
+        context: Context,
+        viewCabecera: View,
+        viewTitulo: View,
+        listaGastos: List<Gasto>,
+        mapaBitmapsGastos: Map<Long, Bitmap>,
+        mapaCategoriasUri: Map<String, String?> // <--- NUEVO PARÁMETRO
+    ): Bitmap? {
+        if (listaGastos.isEmpty()) return null
+
+        val ancho = viewCabecera.width
+        val bindingItem = ItemGastoBinding.inflate(LayoutInflater.from(context))
+        var alturaTotal = viewCabecera.height + viewTitulo.height + 50
+        val itemsHeights = mutableListOf<Int>()
+        for (gasto in listaGastos) {
+            bindingItem.tvNombre.text = gasto.nombre
+            val tieneFoto = gasto.uriFoto != null || mapaBitmapsGastos.containsKey(gasto.id)
+            bindingItem.cardThumb.visibility = if (tieneFoto) View.VISIBLE else View.GONE
+            bindingItem.root.measure(View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            itemsHeights.add(bindingItem.root.measuredHeight)
+            alturaTotal += bindingItem.root.measuredHeight
+        }
+
+        val bitmap = Bitmap.createBitmap(ancho, alturaTotal, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+
+        // Dibujar Cabecera y Título con el "TRUCO" de medida también aquí
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY)
+        val heightSpecCabecera = View.MeasureSpec.makeMeasureSpec(viewCabecera.height, View.MeasureSpec.EXACTLY)
+        viewCabecera.measure(widthSpec, heightSpecCabecera)
+        viewCabecera.layout(0, 0, ancho, viewCabecera.measuredHeight)
+        viewCabecera.draw(canvas)
+
+        val heightSpecTitulo = View.MeasureSpec.makeMeasureSpec(viewTitulo.height, View.MeasureSpec.EXACTLY)
+        viewTitulo.measure(widthSpec, heightSpecTitulo)
+        viewTitulo.layout(0, 0, ancho, viewTitulo.measuredHeight)
+        canvas.save()
+        canvas.translate(0f, viewCabecera.height.toFloat())
+        viewTitulo.draw(canvas)
+        canvas.restore()
+
+        var currentY = viewCabecera.height.toFloat() + viewTitulo.height.toFloat() + 20f
+
+        for ((index, gasto) in listaGastos.withIndex()) {
+            bindingItem.tvNombre.text = gasto.nombre
+            bindingItem.tvCantidad.text = Formato.formatearMoneda(gasto.cantidad)
+            bindingItem.tvFecha.text = SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(gasto.fecha))
+
+            // --- CORRECCIÓN CATEGORÍAS ---
+            val uriCat = mapaCategoriasUri[gasto.categoria]
+            if (uriCat != null) {
+                // Si la categoría tiene foto personalizada, intentamos cargarla
+                // NOTA: Como esto corre en hilo de fondo (desde ExportManager), podemos usar Glide síncrono
+                try {
+                    val bitmapCat = com.bumptech.glide.Glide.with(context)
+                        .asBitmap()
+                        .load(uriCat)
+                        .submit(48, 48) // Tamaño pequeño para icono
+                        .get()
+                    bindingItem.ivIconoCategoria.setImageBitmap(bitmapCat)
+                    bindingItem.ivIconoCategoria.setPadding(0,0,0,0) // Quitar padding si es foto completa
+                } catch (e: Exception) {
+                    // Si falla, icono por defecto
+                    bindingItem.ivIconoCategoria.setImageResource(CategoriasHelper.obtenerIcono(gasto.categoria))
+                }
+            } else {
+                // Icono estándar
+                val iconoRes = CategoriasHelper.obtenerIcono(gasto.categoria)
+                bindingItem.ivIconoCategoria.setImageResource(iconoRes)
+            }
+
+            // Gestión de Foto Gasto (Igual que tenías)
+            val bitmapPrecargado = mapaBitmapsGastos[gasto.id]
+            if (bitmapPrecargado != null) {
+                bindingItem.cardThumb.visibility = View.VISIBLE
+                bindingItem.ivThumb.visibility = View.VISIBLE
+                bindingItem.ivThumb.setImageBitmap(bitmapPrecargado)
+                bindingItem.ivThumb.setPadding(0,0,0,0)
+            } else if (gasto.uriFoto != null) {
+                bindingItem.cardThumb.visibility = View.VISIBLE
+                bindingItem.ivThumb.setImageResource(android.R.drawable.ic_menu_gallery)
+            } else {
+                bindingItem.cardThumb.visibility = View.GONE
+            }
+
+            bindingItem.root.measure(View.MeasureSpec.makeMeasureSpec(ancho, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
             bindingItem.root.layout(0, 0, ancho, bindingItem.root.measuredHeight)
 
             canvas.save()

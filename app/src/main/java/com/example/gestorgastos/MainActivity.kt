@@ -297,15 +297,54 @@ class MainActivity : AppCompatActivity() {
 
     // --- EXPORTAR / IMPORTAR ---
     private fun manejarExportacionImagen() {
-        val lista = viewModel.gastosVisibles.value ?: emptyList()
-        if (lista.isEmpty()) { Toast.makeText(this, "Nada que capturar", Toast.LENGTH_SHORT).show(); return }
-        val vistas = ExportManager.VistasCaptura(binding.cardResumen, binding.layoutNavegacion, binding.chartGastos, binding.chartCategorias, binding.rvCalendario, binding.layoutVistaCategorias)
-        exportManager.procesarCapturaImagen(vistaActual, lista, vistas) { bitmap ->
+        val listaTotalMes = viewModel.gastosVisibles.value ?: emptyList()
+        if (listaTotalMes.isEmpty()) { Toast.makeText(this, "Nada que capturar", Toast.LENGTH_SHORT).show(); return }
+
+        val mapaCategorias = viewModel.listaCategorias.value?.associate { it.nombre to it.uriFoto } ?: emptyMap()
+
+        // 1. SELECCIONAR EL ADAPTADOR CORRECTO (Siempre un GastoAdapter)
+        // Usamos 'viewConfigurator' para acceder a los adaptadores de las listas de detalles
+        val adapterActivo = when (vistaActual) {
+            Vista.CALENDARIO -> viewConfigurator.adapterGastosCalendario // La lista debajo del calendario
+            Vista.GRAFICA -> viewConfigurator.adapterGastosGrafica       // La lista debajo de la gráfica
+            Vista.QUESITOS -> viewConfigurator.adapterGastosCategoria    // La lista debajo del gráfico circular
+            else -> viewConfigurator.adapterLista                        // La lista principal
+        }
+
+        // Ahora sí funciona .currentList porque todos son GastoAdapter
+        val listaSubDetalles = adapterActivo.currentList
+
+        // 2. CONFIGURAR LAS VISTAS (Usando el ID correcto rvGastos)
+        val vistas = ExportManager.VistasCaptura(
+            binding.cardResumen,
+            binding.layoutNavegacion,
+            binding.chartGastos,
+            binding.chartCategorias,
+            binding.rvCalendario,
+            binding.layoutVistaCategorias,
+            binding.rvGastos // <--- CORREGIDO: Este es el ID que me has pasado
+        )
+
+        exportManager.procesarCapturaImagen(
+            vistaActual,
+            listaTotalMes,
+            listaSubDetalles,
+            vistas,
+            mapaCategorias
+        ) { bitmap ->
             if (bitmap != null) {
-                AlertDialog.Builder(this).setTitle("Imagen lista").setItems(arrayOf("Guardar", "Compartir")) { _, i ->
-                    if (i == 0) ExportarHelper.guardarEnDispositivo(this, bitmap, null, true)
-                    else ExportarHelper.compartir(this, bitmap, null, true)
-                }.show()
+                AlertDialog.Builder(this)
+                    .setTitle("Captura Lista")
+                    .setItems(arrayOf("Guardar en Galería", "Compartir")) { _, i ->
+                        if (i == 0) ExportarHelper.guardarEnDispositivo(this, bitmap, null, true)
+                        else ExportarHelper.compartir(this, bitmap, null, true)
+                    }
+                    .setOnDismissListener {
+                        // Refrescar UI para evitar bugs visuales tras la captura
+                        binding.root.requestLayout()
+                        binding.root.invalidate()
+                    }
+                    .show()
             }
         }
     }

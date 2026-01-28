@@ -139,87 +139,91 @@ class ExportManager(
     // --- LÓGICA DE CAPTURA DE PANTALLA (Ya la tenías) ---
     data class VistasCaptura(
         val cardResumen: View, val layoutNav: View, val chartGastos: View,
-        val chartCategorias: View, val rvCalendario: View, val layoutQuesitos: View
+        val chartCategorias: View, val rvCalendario: View, val layoutQuesitos: View,
+        val rvListaDetalles: View // El recycler de abajo
     )
 
     fun procesarCapturaImagen(
         vistaActual: MainActivity.Vista,
-        lista: List<Gasto>,
+        listaCompleta: List<Gasto>,
+        listaFiltradaDetalles: List<Gasto>, // <--- NUEVO PARÁMETRO: La lista específica del día/categoría
         vistas: VistasCaptura,
+        mapaCategorias: Map<String, String?>,
         onBitmapListo: (Bitmap?) -> Unit
     ) {
         scope.launch(Dispatchers.Main) {
-            // 1. Decidir qué cabecera usar según la vista
-            val viewCabecera = vistas.cardResumen
-            val viewTitulo = vistas.layoutNav // Usamos la barra de navegación/título como separador
+            val loading = AlertDialog.Builder(context).setMessage("Generando captura...").setCancelable(false).show()
 
-            // 2. Si es VISTA LISTA, generamos la imagen larga procesando ítem por ítem
-            if (vistaActual == MainActivity.Vista.LISTA) {
-                // Mostrar progreso porque esto puede tardar si hay muchas fotos
-                val loading = AlertDialog.Builder(context)
-                    .setMessage("Generando imagen larga...")
-                    .setCancelable(false)
-                    .show()
+            withContext(Dispatchers.IO) {
+                // 1. Precargar bitmaps de las fotos (Tanto para lista completa como filtrada)
+                val mapaBitmaps = mutableMapOf<Long, Bitmap>()
+                // Cargamos fotos de la lista que vayamos a usar
+                val listaAUsar = if (vistaActual == MainActivity.Vista.LISTA) listaCompleta else listaFiltradaDetalles
 
-                withContext(Dispatchers.IO) {
-                    // A. Precargar los bitmaps de las fotos de los gastos para pintarlos en el Canvas
-                    val mapaBitmaps = mutableMapOf<Long, Bitmap>()
-
-                    for (gasto in lista) {
-                        if (gasto.uriFoto != null) {
-                            try {
-                                val future: FutureTarget<Bitmap> = Glide.with(context)
-                                    .asBitmap()
-                                    .load(gasto.uriFoto)
-                                    .submit(100, 100) // Miniatura
-                                val bitmap = future.get()
-                                mapaBitmaps[gasto.id] = bitmap
-                                Glide.with(context).clear(future)
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
+                for (gasto in listaAUsar) {
+                    if (gasto.uriFoto != null) {
+                        try {
+                            val b = Glide.with(context).asBitmap().load(gasto.uriFoto).submit(100, 100).get()
+                            mapaBitmaps[gasto.id] = b
+                        } catch (e: Exception) {}
                     }
+                }
 
-                    // B. Llamar a tu Helper original que hace la magia
-                    val bitmapFinal = ExportarHelper.generarImagenLarga(
-                        context,
-                        viewCabecera,
-                        viewTitulo,
-                        lista,
-                        mapaBitmaps
+                // 2. Generar el Bitmap final según la vista
+                val bitmapFinal: Bitmap?
+
+                if (vistaActual == MainActivity.Vista.LISTA) {
+                    // MODO LISTA COMPLETA
+                    // Usamos la cabecera + título + lista generada
+                    val bmpLista = ExportarHelper.generarImagenListaItems(
+                        context, listaCompleta, mapaBitmaps, mapaCategorias, vistas.cardResumen.width
                     )
 
-                    withContext(Dispatchers.Main) {
-                        loading.dismiss()
-                        onBitmapListo(bitmapFinal)
+                    bitmapFinal = if (bmpLista != null) {
+                        ExportarHelper.unirVistasEnBitmap(vistas.cardResumen, vistas.layoutNav, bmpLista, context)
+                    } else null
+
+                } else {
+                    // MODO CALENDARIO / GRÁFICA / QUESITOS
+
+                    // A. Capturar la vista principal (Gráfica, Calendario...)
+                    val viewPrincipal = when (vistaActual) {
+                        MainActivity.Vista.CALENDARIO -> vistas.rvCalendario
+                        MainActivity.Vista.GRAFICA -> vistas.chartGastos
+                        MainActivity.Vista.QUESITOS -> vistas.chartCategorias
+                        else -> vistas.chartGastos
                     }
+                    val bmpPrincipal = ExportarHelper.capturarVista(viewPrincipal)
+
+                    // B. Generar la sublista de detalles (SI HAY ELEMENTOS)
+                    var bmpDetalles: Bitmap? = null
+                    if (listaFiltradaDetalles.isNotEmpty()) {
+                        // Generamos la imagen item por item para que salga completa (scroll infinito)
+                        bmpDetalles = ExportarHelper.generarImagenListaItems(
+                            context,
+                            listaFiltradaDetalles,
+                            mapaBitmaps,
+                            mapaCategorias,
+                            vistas.cardResumen.width // Usamos el ancho de la pantalla
+                        )
+                    }
+
+                    // C. Unir Principal + Detalles
+                    val bmpContenido = ExportarHelper.combinarBitmapsVerticalmente(bmpPrincipal, bmpDetalles)
+
+                    // D. Unir con Cabecera y Título (con el fondo amarillo corregido)
+                    bitmapFinal = ExportarHelper.unirVistasEnBitmap(
+                        vistas.cardResumen,
+                        vistas.layoutNav,
+                        bmpContenido,
+                        context
+                    )
                 }
-            } else {
-                // 3. Si es OTRA VISTA (Gráfica, Calendario...), hacemos captura simple
-                val viewContenido = when (vistaActual) {
-                    MainActivity.Vista.CALENDARIO -> vistas.rvCalendario
-                    MainActivity.Vista.GRAFICA -> vistas.chartGastos
-                    MainActivity.Vista.QUESITOS -> vistas.layoutQuesitos
-                    else -> vistas.chartGastos
+
+                withContext(Dispatchers.Main) {
+                    loading.dismiss()
+                    onBitmapListo(bitmapFinal)
                 }
-
-                // Capturamos las partes
-                val bmpCabecera = ExportarHelper.capturarVista(viewCabecera)
-                val bmpTitulo = ExportarHelper.capturarVista(viewTitulo)
-                val bmpContenido = ExportarHelper.capturarVista(viewContenido)
-
-                // Las unimos
-                val bitmapFinal = ExportarHelper.unirVistasEnBitmap(
-                    viewCabecera, // Pasamos la vista para medir anchos en el helper si es necesario
-                    viewTitulo,   // (Ojo: tu helper unirVistas usa Views para pintar o Bitmaps?
-                    // Si tu helper `unirVistasEnBitmap` usa Views, pásale las views.
-                    // Si usa Bitmaps, pásale los bitmaps.
-                    // Asumo por tu código anterior que usa Views para dibujar y un bitmap de contenido).
-                    bitmapContenido = bmpContenido
-                )
-
-                onBitmapListo(bitmapFinal)
             }
         }
     }
