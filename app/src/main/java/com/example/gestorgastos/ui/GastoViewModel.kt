@@ -118,8 +118,30 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { dao.insertarGasto(nuevoGasto) }
     }
 
-    fun borrarGasto(gasto: Gasto) { viewModelScope.launch(Dispatchers.IO) { dao.borrarGasto(gasto) } }
-    fun actualizarGasto(gasto: Gasto) { viewModelScope.launch(Dispatchers.IO) { dao.actualizarGasto(gasto) } }
+    fun borrarGasto(gasto: Gasto) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // 1. Borramos el archivo físico primero
+            borrarArchivoFisico(gasto.uriFoto)
+            // 2. Borramos de la BD
+            dao.borrarGasto(gasto)
+        }
+    }
+    fun actualizarGasto(gastoNuevo: Gasto) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // 1. Obtenemos el gasto viejo para ver qué foto tenía
+            val gastoViejo = dao.obtenerGastoPorId(gastoNuevo.id) // Necesitas esta query en DAO
+
+            // 2. Si tenía foto, y es DIFERENTE a la nueva (o ahora es null), borramos la vieja
+            if (gastoViejo != null && !gastoViejo.uriFoto.isNullOrEmpty()) {
+                if (gastoViejo.uriFoto != gastoNuevo.uriFoto) {
+                    borrarArchivoFisico(gastoViejo.uriFoto)
+                }
+            }
+
+            // 3. Actualizamos en BD
+            dao.actualizarGasto(gastoNuevo)
+        }
+    }
 
     fun cambiarMes(nuevoMes: YearMonth) { _mesSeleccionado.value = nuevoMes }
     fun mesAnterior() { _mesSeleccionado.value = _mesSeleccionado.value.minusMonths(1) }
@@ -220,6 +242,67 @@ class GastoViewModel(application: Application) : AndroidViewModel(application) {
             val cantidad = dao.contarGastosPorCategoria(nombre)
             withContext(Dispatchers.Main) {
                 alTerminar(cantidad)
+            }
+        }
+    }
+
+    // 1. Herramienta auxiliar para borrar un archivo dada su URI string
+    private fun borrarArchivoFisico(uriString: String?) {
+        if (uriString.isNullOrEmpty()) return
+        try {
+            val uri = android.net.Uri.parse(uriString)
+            // Solo borramos si el archivo está en nuestra carpeta privada (filesDir)
+            // Esto evita intentar borrar fotos de la galería del sistema si usaras rutas externas
+            if (uri.path?.contains(getApplication<Application>().filesDir.absolutePath) == true) {
+                val file = java.io.File(uri.path!!)
+                if (file.exists()) {
+                    file.delete()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // 2. FUNCIÓN MAESTRA: RECOLECTOR DE BASURA
+    // Llámala al iniciar la App para limpiar residuos de sesiones anteriores (ej. diálogos cancelados)
+    fun limpiarArchivosHuerfanos() {
+        viewModelScope.launch(Dispatchers.IO) {
+            // A. Obtenemos TODAS las URIs que la base de datos dice que estamos usando
+            val gastos = dao.obtenerTodosLosGastosSincrono() // Necesitarás crear esta query simple o usar una existente
+            val categorias = dao.obtenerTodasLasCategoriasDirecto()
+
+            val urisEnUso = mutableSetOf<String>()
+
+            gastos.forEach { g -> g.uriFoto?.let { urisEnUso.add(it) } }
+            categorias.forEach { c -> c.uriFoto?.let { urisEnUso.add(it) } }
+
+            // B. Listamos TODOS los archivos físicos reales en la carpeta de imágenes
+            val carpetaArchivos = getApplication<Application>().filesDir
+            val archivosReales = carpetaArchivos.listFiles() ?: return@launch
+
+            var archivosBorrados = 0
+
+            // C. Comparamos: Si existe el archivo FÍSICO pero NO está en la BD -> Es basura
+            for (archivo in archivosReales) {
+                // Filtramos solo nuestras imágenes (suelen empezar por img_ o el prefijo que uses)
+                // Ojo: no borrar archivos de base de datos o preferencias
+                if (archivo.name.startsWith("img_") || archivo.name.endsWith(".jpg")) {
+
+                    // Reconstruimos la URI tal como la guardas en BD para comparar
+                    // Usamos FileProvider o path absoluto según como lo guardes.
+                    // Como tu 'copiarImagenAInternalStorage' devuelve la URI completa string, comparamos buscando el nombre
+
+                    val estaEnUso = urisEnUso.any { uriDb -> uriDb.contains(archivo.name) }
+
+                    if (!estaEnUso) {
+                        archivo.delete()
+                        archivosBorrados++
+                    }
+                }
+            }
+            if (archivosBorrados > 0) {
+                println("LIMPIEZA: Se han eliminado $archivosBorrados imágenes huérfanas.")
             }
         }
     }

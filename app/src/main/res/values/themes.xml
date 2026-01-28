@@ -6,4 +6,12 @@
     </style>
 
     <style name="Theme.GestorGastos" parent="Base.Theme.GestorGastos" />
+    <style name="EstiloListaScrollVisible" parent="Widget.AppCompat.ListView.DropDown">
+        <item name="android:scrollbars">vertical</item>
+        <item name="android:fadeScrollbars">false</item> <item name="android:scrollbarThumbVertical">@android:color/darker_gray</item>
+        <item name="android:scrollbarSize">4dp</item> </style>
+
+    <style name="TemaDesplegableConScroll" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:dropDownListViewStyle">@style/EstiloListaScrollVisible</item>
+    </style>
 </resources>

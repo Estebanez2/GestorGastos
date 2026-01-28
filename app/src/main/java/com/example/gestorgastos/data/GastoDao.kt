@@ -129,4 +129,9 @@ interface GastoDao {
 
     @Query("SELECT COUNT(*) FROM tabla_gastos WHERE categoria = :nombreCategoria")
     suspend fun contarGastosPorCategoria(nombreCategoria: String): Int
+
+    @Query("SELECT * FROM tabla_gastos")
+    fun obtenerTodosLosGastosSincrono(): List<Gasto>
+    @Query("SELECT * FROM tabla_gastos WHERE id = :id LIMIT 1")
+    fun obtenerGastoPorId(id: Long): Gasto?
 }

@@ -61,6 +61,8 @@
                 android:inputType="none"
                 android:padding="@dimen/padding_input_text"
                 android:text="Otros"
+                android:theme="@style/TemaDesplegableConScroll"
+                android:dropDownHeight="350dp"
                 />
         </com.google.android.material.textfield.TextInputLayout>
 

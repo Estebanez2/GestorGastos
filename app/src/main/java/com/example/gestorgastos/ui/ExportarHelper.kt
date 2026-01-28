@@ -255,16 +255,38 @@ object ExportarHelper {
 
     fun copiarImagenAInternalStorage(context: Context, uriExterna: Uri): String? {
         return try {
-            val inputStream: InputStream? = context.contentResolver.openInputStream(uriExterna)
             val fileName = "img_${UUID.randomUUID()}.jpg"
             val file = File(context.filesDir, fileName)
+
+            val inputStream = context.contentResolver.openInputStream(uriExterna) ?: return null
+
+            // --- INICIO OPTIMIZACIÓN ---
+            // 1. Decodificar
+            val bitmapOriginal = android.graphics.BitmapFactory.decodeStream(inputStream)
+            inputStream.close()
+
+            if (bitmapOriginal == null) return null // Por si el archivo no era una imagen válida
+
+            // 2. Redimensionar si es gigante (ej. fotos de cámara de 4000px)
+            val maxDimension = 1920 // Full HD es suficiente para móvil
+            val bitmapFinal = if (bitmapOriginal.width > maxDimension || bitmapOriginal.height > maxDimension) {
+                val ratio = maxDimension.toDouble() / maxOf(bitmapOriginal.width, bitmapOriginal.height)
+                val anchoNuevo = (bitmapOriginal.width * ratio).toInt()
+                val altoNuevo = (bitmapOriginal.height * ratio).toInt()
+                android.graphics.Bitmap.createScaledBitmap(bitmapOriginal, anchoNuevo, altoNuevo, true)
+            } else {
+                bitmapOriginal
+            }
+
+            // 3. Guardar Comprimido (Calidad 75% reduce mucho el peso sin perder calidad visual)
             val outputStream = FileOutputStream(file)
+            bitmapFinal.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
 
-            inputStream?.copyTo(outputStream)
-            inputStream?.close()
+            outputStream.flush()
             outputStream.close()
+            // --- FIN OPTIMIZACIÓN ---
 
-            // Devolvemos la URI en formato String para guardarla en la BD
+            // Devolvemos la URI string para guardar en BD
             FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file).toString()
         } catch (e: Exception) {
             e.printStackTrace()

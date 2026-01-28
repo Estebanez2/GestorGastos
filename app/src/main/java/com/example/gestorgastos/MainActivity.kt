@@ -93,7 +93,7 @@ class MainActivity : AppCompatActivity() {
         // Recuperamos la vista o usamos LISTA si falla algo
         vistaActual = Vista.values().getOrElse(vistaGuardadaIndex) { Vista.LISTA }
         viewModel = ViewModelProvider(this)[GastoViewModel::class.java]
-
+        viewModel.limpiarArchivosHuerfanos()
         inicializarManagers()
 
         // Configuración delegada de Vistas y Swipe

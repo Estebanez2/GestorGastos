@@ -1,7 +1,9 @@
 package com.example.gestorgastos.ui
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.view.View
 import androidx.core.content.ContextCompat
@@ -73,18 +75,42 @@ fun Activity.ejecutarConPermisoCamara(
     }
 }
 
-fun android.content.Context.copiarImagenAInternalStorage(uriExterna: Uri): String {
+fun Context.copiarImagenAInternalStorage(uriExterna: Uri): String {
     return try {
+        // Creamos archivo destino
         val archivoDestino = File(filesDir, "img_${System.currentTimeMillis()}.jpg")
-        contentResolver.openInputStream(uriExterna)?.use { input ->
-            java.io.FileOutputStream(archivoDestino).use { output ->
-                input.copyTo(output)
-            }
+
+        // Abrimos el stream de la imagen original
+        val inputStream = contentResolver.openInputStream(uriExterna)
+
+        // --- MAGIA DE COMPRESIÓN ---
+        // 1. Decodificamos a Bitmap
+        val bitmapOriginal = android.graphics.BitmapFactory.decodeStream(inputStream)
+        inputStream?.close()
+
+        // 2. Redimensionamos si es gigante (Opcional, pero recomendado)
+        // Si es mayor a 1920px de ancho, lo bajamos. Ahorra mucha memoria RAM y disco.
+        val bitmapFinal = if (bitmapOriginal.width > 1920) {
+            val ratio = 1920.0 / bitmapOriginal.width
+            val alto = (bitmapOriginal.height * ratio).toInt()
+            Bitmap.createScaledBitmap(bitmapOriginal, 1920, alto, true)
+        } else {
+            bitmapOriginal
         }
-        // Devuelve la URI segura generada por FileProvider
-        FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivoDestino).toString()
+
+        // 3. Guardamos comprimiendo a JPG calidad 70-80%
+        val outputStream = java.io.FileOutputStream(archivoDestino)
+        bitmapFinal.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, outputStream)
+
+        outputStream.flush()
+        outputStream.close()
+
+        // 4. Devolvemos la URI del nuevo archivo optimizado
+        androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivoDestino).toString()
+
     } catch (e: Exception) {
         e.printStackTrace()
+        // Si falla la compresión, devolvemos la URI original por seguridad (o null)
         uriExterna.toString()
     }
 }
